@@ -1,0 +1,12 @@
+{
+  "name": "fns-codex-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "commonjs",
+  "scripts": {
+    "web": "node web-terminal.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
