@@ -1,0 +1,8 @@
+nohup: ignoring input
+
+> fns-codex-bridge@0.1.0 web
+> bash -lc 'if [ -f ./local.config.sh ]; then source ./local.config.sh; fi; export TZ="${TZ:-Asia/Shanghai}" APP_TIME_ZONE="${APP_TIME_ZONE:-Asia/Shanghai}"; node web-terminal.js'
+
+Codex Notes listening on http://0.0.0.0:8000
+FNS: http://20.205.107.61:9000
+Default vault: Life-Learing

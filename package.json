@@ -1,0 +1,12 @@
+{
+  "name": "fns-codex-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "commonjs",
+  "scripts": {
+    "web": "bash -lc 'if [ -f ./local.config.sh ]; then source ./local.config.sh; fi; export TZ=\"${TZ:-Asia/Shanghai}\" APP_TIME_ZONE=\"${APP_TIME_ZONE:-Asia/Shanghai}\"; node web-terminal.js'"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
