@@ -1,12 +1,14 @@
 {
-  "name": "fns-codex-bridge",
+  "name": "autoobsidian",
+  "version": "0.3.0",
   "private": true,
-  "version": "0.1.0",
+  "description": "Claude-powered cloud notes bridge for Obsidian vaults via FNS API",
   "type": "commonjs",
   "scripts": {
-    "web": "node web-terminal.js"
+    "web": "bash -lc 'if [ -f ./local.config.sh ]; then source ./local.config.sh; fi; export TZ=\"${TZ:-Asia/Shanghai}\" APP_TIME_ZONE=\"${APP_TIME_ZONE:-Asia/Shanghai}\"; node web-terminal.js'",
+    "mcp": "bash -lc 'if [ -f ./local.config.sh ]; then source ./local.config.sh; fi; python3 server.py'"
   },
   "dependencies": {
-    "ws": "^8.18.3"
+    "@anthropic-ai/sdk": "^0.37.0"
   }
 }

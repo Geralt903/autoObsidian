@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "fns-local": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["src/server.py"],
+      "env": {
+        "FNS_TOKEN": "${FNS_TOKEN}",
+        "FNS_BASE_URL": "${FNS_BASE_URL:-http://127.0.0.1:9000}",
+        "FNS_DEFAULT_VAULT": "${FNS_DEFAULT_VAULT:-Life-Learing}"
+      }
+    }
+  }
+}
