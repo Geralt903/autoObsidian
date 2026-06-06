@@ -125,55 +125,6 @@ function normalizeReasoningEffort(effort) {
   return REASONING_EFFORTS.includes(effort) ? effort : DEFAULT_REASONING_EFFORT;
 }
 
-function runCodex(userText, task, model, effort) {
-  const selectedModel = normalizeModel(model);
-  const selectedEffort = normalizeReasoningEffort(effort);
-  return new Promise((resolve, reject) => {
-    const child = spawn('codex', [
-      'exec',
-      '-m',
-      selectedModel,
-      '-c',
-      `model_reasoning_effort="${selectedEffort}"`,
-      '--dangerously-bypass-approvals-and-sandbox',
-      '-C',
-      process.cwd(),
-      '-',
-    ], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        FNS_BASE_URL,
-        FNS_TOKEN,
-        FNS_DEFAULT_VAULT: DEFAULT_VAULT,
-        TZ: APP_TIME_ZONE,
-        APP_TIME_ZONE,
-      },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error('Codex execution timed out'));
-    }, CODEX_TIMEOUT_MS);
-
-    child.stdout.on('data', (data) => { stdout += data.toString('utf8'); });
-    child.stderr.on('data', (data) => { stderr += data.toString('utf8'); });
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve(stdout.trim() || '完成');
-      else reject(new Error((stderr || stdout || `Codex exited with ${code}`).trim()));
-    });
-    child.stdin.end(buildPrompt(userText, task));
-  });
-}
-
 function serializeJob(job) {
   return {
     id: job.id,
@@ -220,9 +171,14 @@ async function processQueue() {
   job.status = 'running';
   job.startedAt = `${now.date} ${now.time}`;
   try {
-    job.reply = await runCodex(job.message, job.task, job.model, job.effort);
+    job._child = spawnCodex(job.message, job.task, job.model, job.effort);
+    job.reply = await job._child;
+    job._child = null;
+    if (job.status === 'cancelled') return;
     job.status = 'done';
   } catch (err) {
+    job._child = null;
+    if (job.status === 'cancelled') return;
     job.error = err.message || String(err);
     job.status = 'failed';
   } finally {
@@ -231,6 +187,64 @@ async function processQueue() {
     activeJob = null;
     processQueue();
   }
+}
+
+function spawnCodex(userText, task, model, effort) {
+  const selectedModel = normalizeModel(model);
+  const selectedEffort = normalizeReasoningEffort(effort);
+  return new Promise((resolve, reject) => {
+    const child = spawn('codex', [
+      'exec',
+      '-m',
+      selectedModel,
+      '-c',
+      `model_reasoning_effort="${selectedEffort}"`,
+      '--dangerously-bypass-approvals-and-sandbox',
+      '-C',
+      process.cwd(),
+      '-',
+    ], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        FNS_BASE_URL,
+        FNS_TOKEN,
+        FNS_DEFAULT_VAULT: DEFAULT_VAULT,
+        TZ: APP_TIME_ZONE,
+        APP_TIME_ZONE,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error('Codex execution timed out'));
+    }, CODEX_TIMEOUT_MS);
+
+    child.stdout.on('data', (data) => { stdout += data.toString('utf8'); });
+    child.stderr.on('data', (data) => { stderr += data.toString('utf8'); });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(stdout.trim() || '完成');
+      else reject(new Error((stderr || stdout || `Codex exited with ${code}`).trim()));
+    });
+    child.stdin.end(buildPrompt(userText, task));
+
+    // Attach kill helper
+    child._killed = false;
+    child.cancelJob = () => {
+      child._killed = true;
+      clearTimeout(timer);
+      child.kill('SIGTERM');
+      setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 3000);
+    };
+  });
 }
 
 const html = `<!doctype html>
@@ -244,14 +258,22 @@ const html = `<!doctype html>
     *{box-sizing:border-box}
     html,body{height:100%;max-width:100%;overflow-x:hidden}
     body{width:100%;margin:0;background:radial-gradient(circle at 18% -10%,rgba(100,210,193,.16),transparent 28%),linear-gradient(180deg,#151917 0,#0c0f10 48%,#080a0a 100%);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    .app{width:100%;max-width:100vw;min-width:0;min-height:100%;min-height:100dvh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;overflow-x:hidden}
+    .app{width:100%;max-width:100vw;min-width:0;min-height:100%;min-height:100dvh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;overflow-x:hidden;position:relative}
+    .toast{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99;padding:10px 20px;border-radius:999px;background:rgba(16,20,19,.94);color:var(--ok);border:1px solid rgba(143,229,167,.3);font-size:13px;font-weight:650;opacity:0;pointer-events:none;transition:opacity .3s;backdrop-filter:blur(10px)}
+    .toast.show{opacity:1}
     header{z-index:3;padding:12px max(14px,env(safe-area-inset-left)) 12px max(14px,env(safe-area-inset-right));border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:10px 12px;background:rgba(12,15,16,.86);position:sticky;top:0;backdrop-filter:blur(16px)}
     .brand{display:flex;align-items:center;gap:10px;min-width:0}
     .mark{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 10px 30px rgba(100,210,193,.18);display:grid;place-items:center;color:#0b100e;font-weight:900}
     h1{font-size:17px;margin:0;font-weight:780;letter-spacing:0}
     .subtitle{font-size:12px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .controls{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;max-width:100%}
-    .state{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:7px 10px;white-space:nowrap;background:rgba(255,255,255,.03)}
+    .state{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:7px 10px;white-space:nowrap;background:rgba(255,255,255,.03);transition:all .3s}
+    .cancel-btn{display:none;height:30px;width:30px;min-width:30px;border:1px solid var(--bad);border-radius:50%;background:transparent;color:var(--bad);font-size:14px;cursor:pointer;padding:0;line-height:1}
+    .cancel-btn.visible{display:inline-flex;align-items:center;justify-content:center}
+    .state[data-status="running"]{color:var(--accent);border-color:rgba(199,243,107,.45);animation:pulse 1.6s ease-in-out infinite}
+    .state[data-status="queued"]{color:var(--accent-2);border-color:rgba(100,210,193,.35)}
+    .state[data-status="error"]{color:var(--bad);border-color:rgba(255,145,135,.4)}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
     main{padding:14px;overflow:auto;min-width:0}
     .tasks{width:100%;min-width:0;border-bottom:1px solid var(--line);background:rgba(18,22,20,.78);padding:10px 12px;box-shadow:var(--shadow)}
     .task-panel{width:100%;max-width:880px;min-width:0;margin:0 auto}
@@ -270,9 +292,12 @@ const html = `<!doctype html>
     .msg.user{margin-left:auto;max-width:min(760px,92%);background:rgba(199,243,107,.1);border-color:rgba(199,243,107,.28)}
     .msg.assistant{margin-right:auto;max-width:min(820px,100%);background:rgba(255,255,255,.045)}
     .meta{font-size:12px;color:var(--muted);margin-bottom:4px}
+    .scroll-hint{position:sticky;bottom:6px;display:none;margin:8px auto 0;height:34px;min-width:100px;border:1px solid var(--accent-2);border-radius:999px;background:rgba(16,20,19,.92);color:var(--accent-2);font-size:13px;font-weight:650;cursor:pointer;backdrop-filter:blur(8px);box-shadow:0 4px 16px rgba(0,0,0,.3)}
+    .scroll-hint.visible{display:block}
     form{width:100%;min-width:0;z-index:2;padding:10px max(12px,env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right));border-top:1px solid var(--line);background:rgba(12,15,16,.9);backdrop-filter:blur(16px)}
     .bar{width:100%;max-width:880px;min-width:0;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
     textarea{width:100%;min-height:54px;max-height:160px;resize:none;border:1px solid var(--line);border-radius:8px;background:#111615;color:var(--text);padding:12px;outline:none;font:inherit;line-height:1.45}
+    .char-count{font-size:11px;color:var(--muted);text-align:right;grid-column:1 / -1;margin-top:2px}
     button{height:54px;min-width:76px;border:0;border-radius:8px;background:var(--accent);color:#0d120f;font-weight:800;font:inherit;cursor:pointer}
     button:hover{filter:brightness(1.03)}
     .small{height:42px;min-width:64px}
@@ -331,9 +356,10 @@ const html = `<!doctype html>
 </head>
 <body>
   <div class="app">
+    <div class="toast" id="toast"></div>
     <header>
       <div class="brand"><div class="mark">C</div><div><h1>Codex Notes</h1><div class="subtitle">手机笔记助理</div></div></div>
-      <div class="controls"><select id="modelSelect"></select><select id="effortSelect"></select><div class="state" id="state">ready</div></div>
+      <div class="controls"><select id="modelSelect"></select><select id="effortSelect"></select><button class="cancel-btn" id="cancelBtn" type="button" title="取消任务">✕</button><div class="state" id="state">ready</div></div>
     </header>
     <section class="tasks">
       <details class="task-panel" id="taskPanel" open>
@@ -344,17 +370,22 @@ const html = `<!doctype html>
         </div>
       </details>
     </section>
-    <main><div class="thread" id="thread"><div class="msg assistant"><div class="meta">Codex</div>直接输入要做的事。</div></div></main>
+    <main><div class="thread" id="thread"><div class="msg assistant"><div class="meta">Codex</div>直接输入要做的事。</div></div><button class="scroll-hint" id="scrollHint" type="button" aria-label="滚动到底部">↓ 新消息</button></main>
     <form id="form">
       <div class="jobs" id="jobs"></div>
       <div class="chips">
+        <button class="chip" type="button">今日记录</button>
+        <button class="chip" type="button">搜索笔记</button>
+        <button class="chip" type="button">查看任务</button>
+        <button class="chip" type="button">本周总结</button>
         <button class="chip" id="clearHistory" type="button">清除历史</button>
       </div>
-      <div class="bar"><textarea id="input" placeholder="输入一句话"></textarea><button id="send">发送</button></div>
+      <div class="bar"><textarea id="input" placeholder="输入一句话" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false"></textarea><button id="send">发送</button><span class="char-count" id="charCount"></span></div>
     </form>
   </div>
   <script>
     const thread = document.getElementById('thread');
+    const scrollHint = document.getElementById('scrollHint');
     const form = document.getElementById('form');
     const input = document.getElementById('input');
     const send = document.getElementById('send');
@@ -368,20 +399,49 @@ const html = `<!doctype html>
     const saveTask = document.getElementById('saveTask');
     const jobsEl = document.getElementById('jobs');
     const clearHistory = document.getElementById('clearHistory');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const charCount = document.getElementById('charCount');
+    const toastEl = document.getElementById('toast');
+    let toastTimer = null;
+    function toast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toastEl.classList.remove('show'); }, 2000);
+    }
     let activeTaskPath = '';
+    let taskDirty = false;
+    let savedTaskContent = '';
     const seenDone = new Set();
+    const jobCache = new Map();
     const taskMedia = window.matchMedia('(min-width: 960px)');
     function syncMobileTaskPanel() {
       taskPanel.open = taskMedia.matches;
     }
     syncMobileTaskPanel();
     taskMedia.addEventListener('change', syncMobileTaskPanel);
+    function nowStr() {
+      const d = new Date();
+      return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
+    }
+    function formatMarkdown(text) {
+      let html = text.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+      html = html.replace(/\x60\x60\x60(\w*)\n?([\s\S]*?)\x60\x60\x60/g, (_, lang, code) => '<pre style="background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:13px;margin:6px 0"><code>' + code.trim() + '</code></pre>');
+      html = html.replace(/\x60([^\x60]+)\x60/g, '<code style="background:rgba(199,243,107,.15);color:var(--accent);padding:2px 5px;border-radius:3px;font-size:13px">$1</code>');
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      html = html.replace(/^[*-] (.+)$/gm, '<span style="display:block;padding-left:8px">• $1</span>');
+      return html;
+    }
     function add(role, text) {
+      const main = document.querySelector('main');
+      const atBottom = main.scrollHeight - main.scrollTop - main.clientHeight < 80;
       const div = document.createElement('div');
       div.className = 'msg ' + role;
-      div.innerHTML = '<div class="meta">' + (role === 'user' ? '你' : 'Codex') + '</div>' + text.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+      div.innerHTML = '<div class="meta">' + (role === 'user' ? '你' : 'Codex') + ' · ' + nowStr() + '</div>' + formatMarkdown(text);
       thread.appendChild(div);
-      div.scrollIntoView({block:'end'});
+      if (atBottom) { div.scrollIntoView({block:'end', behavior:'smooth'}); scrollHint.classList.remove('visible'); }
+      else { scrollHint.classList.add('visible'); }
     }
     async function submit(text) {
       const prompt = text.trim();
@@ -395,10 +455,11 @@ const html = `<!doctype html>
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || '请求失败');
         add('assistant', '已入队：' + data.job.id + '（' + data.job.model + ' / ' + data.job.effort + '）');
-        state.textContent = 'ready';
+        loadJobs();
       } catch (err) {
         add('assistant', '失败：' + err.message);
         state.textContent = 'error';
+        state.dataset.status = 'error';
       } finally {
         send.disabled = false;
         input.focus();
@@ -406,6 +467,18 @@ const html = `<!doctype html>
     }
     form.addEventListener('submit', e => { e.preventDefault(); submit(input.value); });
     input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(input.value); } });
+    input.addEventListener('input', () => { const len = input.value.length; charCount.textContent = len > 0 ? len + ' 字符' : ''; });
+    cancelBtn.addEventListener('click', async () => {
+      try {
+        const resp = await fetch('/api/job/cancel', {method:'POST'});
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || '取消失败');
+        toast('已取消任务');
+      } catch (err) {
+        add('assistant', '取消失败：' + err.message);
+      }
+    });
+    scrollHint.addEventListener('click', () => { const last = thread.lastElementChild; if (last) { last.scrollIntoView({block:'end', behavior:'smooth'}); scrollHint.classList.remove('visible'); } });
     document.querySelectorAll('.chip:not(#clearHistory)').forEach(btn => btn.addEventListener('click', () => submit(btn.textContent)));
     async function loadConfig() {
       const resp = await fetch('/api/config');
@@ -420,7 +493,13 @@ const html = `<!doctype html>
       const resp = await fetch('/api/jobs');
       const data = await resp.json();
       if (!resp.ok) return;
-      jobsEl.innerHTML = data.jobs.slice(0, 8).map(job => '<button class="job ' + job.status + '" type="button" data-id="' + job.id + '">' + job.status + ' · ' + job.model + ' · ' + job.effort + '</button>').join('');
+      data.jobs.forEach(job => jobCache.set(job.id, job));
+      const running = data.jobs.find(j => j.status === 'running');
+      const queued = data.jobs.filter(j => j.status === 'queued').length;
+      if (running) { state.textContent = 'running ' + running.model; state.dataset.status = 'running'; cancelBtn.classList.add('visible'); }
+      else if (queued) { state.textContent = queued + ' 个排队中'; state.dataset.status = 'queued'; cancelBtn.classList.add('visible'); }
+      else { state.textContent = 'ready'; state.dataset.status = ''; cancelBtn.classList.remove('visible'); }
+      jobsEl.innerHTML = data.jobs.slice(0, 8).map(job => '<button class="job ' + job.status + '" type="button" data-id="' + job.id + '" title="点击查看详情">' + job.status + ' · ' + job.model + ' · ' + job.effort + '</button>').join('');
       data.jobs.forEach(job => {
         if ((job.status === 'done' || job.status === 'failed') && !seenDone.has(job.id)) {
           seenDone.add(job.id);
@@ -428,6 +507,14 @@ const html = `<!doctype html>
         }
       });
     }
+    jobsEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.job');
+      if (!btn) return;
+      const job = jobCache.get(btn.dataset.id);
+      if (!job) return;
+      const detail = job.status === 'done' ? job.reply : (job.status === 'failed' ? '失败：' + job.error : '排队中...');
+      if (detail) add('assistant', '📋 任务 ' + job.id + '（' + job.model + ' / ' + job.effort + '）\n' + detail);
+    });
     async function loadTasks() {
       state.textContent = 'loading tasks';
       const resp = await fetch('/api/tasks');
@@ -438,15 +525,36 @@ const html = `<!doctype html>
       state.textContent = 'ready';
     }
     async function loadTask(path) {
+      if (taskDirty && path !== activeTaskPath && !confirm('任务范式有未保存的修改，确定放弃并切换吗？')) return;
       activeTaskPath = path;
       taskSummary.textContent = path ? path.split('/').pop() : '未选择';
       const resp = await fetch('/api/task?path=' + encodeURIComponent(path));
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || '读取任务失败');
       taskEditor.value = data.content || '';
+      savedTaskContent = taskEditor.value;
+      taskDirty = false;
     }
-    taskSelect.addEventListener('change', () => loadTask(taskSelect.value).catch(err => { state.textContent = 'error'; add('assistant', '失败：' + err.message); }));
+    taskEditor.addEventListener('input', () => {
+      taskDirty = taskEditor.value !== savedTaskContent;
+    });
+    taskSelect.addEventListener('change', () => loadTask(taskSelect.value).catch(err => { state.textContent = 'error'; state.dataset.status = 'error'; add('assistant', '失败：' + err.message); }));
+    let clearPending = false;
+    let clearTimer = null;
     clearHistory.addEventListener('click', async () => {
+      if (!clearPending) {
+        clearPending = true;
+        clearHistory.textContent = '确认清除';
+        clearHistory.style.borderColor = 'var(--bad)';
+        clearHistory.style.color = 'var(--bad)';
+        clearTimer = setTimeout(() => { clearPending = false; clearHistory.textContent = '清除历史'; clearHistory.style.borderColor = ''; clearHistory.style.color = ''; }, 3000);
+        return;
+      }
+      clearTimeout(clearTimer);
+      clearPending = false;
+      clearHistory.textContent = '清除历史';
+      clearHistory.style.borderColor = '';
+      clearHistory.style.color = '';
       try {
         const resp = await fetch('/api/jobs/clear', {method:'POST'});
         const data = await resp.json();
@@ -465,13 +573,17 @@ const html = `<!doctype html>
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || '保存失败');
         state.textContent = 'ready';
-        add('assistant', '已保存任务范式：' + activeTaskPath);
+        savedTaskContent = taskEditor.value;
+        taskDirty = false;
+        toast('✓ 已保存任务范式');
       } catch (err) {
         state.textContent = 'error';
+        state.dataset.status = 'error';
         add('assistant', '失败：' + err.message);
       }
     });
-    Promise.all([loadConfig(), loadTasks(), loadJobs()]).catch(err => { state.textContent = 'error'; add('assistant', '失败：' + err.message); });
+    state.textContent = '加载中...';
+    Promise.all([loadConfig(), loadTasks(), loadJobs()]).then(() => { state.textContent = 'ready'; }).catch(err => { state.textContent = 'error'; state.dataset.status = 'error'; add('assistant', '加载失败：' + err.message + '（请检查网络或刷新重试）'); });
     setInterval(loadJobs, 2500);
   </script>
 </body>
@@ -495,6 +607,23 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/jobs' && req.method === 'GET') {
       json(res, 200, { activeJob: activeJob ? activeJob.id : null, jobs: jobs.map(serializeJob) });
+      return;
+    }
+    if (url.pathname === '/api/job/cancel' && req.method === 'POST') {
+      const target = activeJob || [...jobs].reverse().find((item) => item.status === 'queued');
+      if (target && target.status === 'running' && target._child && target._child.cancelJob) {
+        target._child.cancelJob();
+        target.status = 'cancelled';
+        target.error = '用户取消';
+        json(res, 200, { ok: true, id: target.id });
+      } else if (target && target.status === 'queued') {
+        target.status = 'cancelled';
+        target.error = '用户取消';
+        target.finishedAt = appNow().date + ' ' + appNow().time;
+        json(res, 200, { ok: true, id: target.id });
+      } else {
+        json(res, 404, { error: '没有可取消的任务' });
+      }
       return;
     }
     if (url.pathname === '/api/jobs/clear' && req.method === 'POST') {
@@ -528,7 +657,12 @@ const server = http.createServer(async (req, res) => {
       const list = Array.isArray(data) ? data : (data?.list || []);
       let tasks = list
         .filter((note) => String(note.path || '').startsWith(TASKS_PREFIX) && String(note.path || '').toLowerCase().endsWith('.md'))
-        .map((note) => ({ path: note.path, name: String(note.path).slice(TASKS_PREFIX.length) }));
+        .map((note) => {
+          const raw = String(note.path).slice(TASKS_PREFIX.length);
+          const display = raw.replace(/\.md$/i, '').replace(/\//g, ' › ');
+          return { path: note.path, name: display };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
       if (tasks.length === 0) {
         const defaultPath = `${TASKS_PREFIX}默认范式.md`;
         const defaultContent = `# 默认范式
@@ -538,7 +672,7 @@ const server = http.createServer(async (req, res) => {
 - 修改前优先读取目标笔记。
 - 完成后说明修改了哪条笔记和写入内容。`;
         await fnsRequest('/api/note', { method: 'POST', body: { vault: DEFAULT_VAULT, path: defaultPath, content: defaultContent } });
-        tasks = [{ path: defaultPath, name: '默认范式.md' }];
+        tasks = [{ path: defaultPath, name: '默认范式' }];
       }
       json(res, 200, { prefix: TASKS_PREFIX, tasks });
       return;
