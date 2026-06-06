@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "fns-local": {
+      "type": "stdio",
+      "command": "bash",
+      "args": ["-c", "source src/local.config.sh && exec python3 src/server.py"]
+    }
+  }
+}

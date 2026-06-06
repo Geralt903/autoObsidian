@@ -1,188 +1,176 @@
-# autoObsidian — 云笔记 Claude Code 项目
+# Claude Notes — 项目文档
 
-## 概述
+> 给未来的你：这是一份修改这个项目的完整指南。
 
-autoObsidian 是 FNS（Fast Note Sync）笔记服务与 Claude/AI 助手之间的桥梁。它把 FNS API 包装成两种可用形式：
+## 项目概要
 
-1. **MCP Server**（`server.py`）— 实现 JSON-RPC 协议的 MCP 服务器，供 Claude Code 等 AI 工具直接调用操作笔记
-2. **Web 终端**（`web-terminal.js`）— 移动端友好的网页，内嵌 Claude API 实现自然语言笔记操作
+手机笔记助理 Web 应用。用户用自然语言操作 Obsidian 笔记（记录、搜索、修改、日程、记账），后端 Claude API (DeepSeek Anthropic 端点) 通过 FNS 服务读写 Obsidian vault。
 
-后端笔记存储是 Obsidian vault，通过 FNS 服务暴露 REST API。
+**核心价值**：移动端友好的网页界面，AI 理解意图 → 自动调用 FNS 工具操作笔记。
 
 ## 架构
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   Claude Code                     │
-│            (MCP JSON-RPC over stdin)              │
-└─────────────────┬───────────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────────┐
-│              server.py (Python)                   │
-│         MCP Server + FNS HTTP Client              │
-└─────────────────┬───────────────────────────────┘
-                  │ HTTP (Bearer Token)
-                  ▼
-┌─────────────────────────────────────────────────┐
-│              FNS API Service                      │
-│         (REST API over Obsidian vaults)           │
-└─────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────┐
-│              Web Browser (Mobile/Desktop)          │
-└─────────────────┬───────────────────────────────┘
-                  │ HTTP (SSE/JSON)
-                  ▼
-┌─────────────────────────────────────────────────┐
-│          web-terminal.js (Node.js)                │
-│      Anthropic API → Claude tool use → FNS        │
-└────────┬──────────────────┬─────────────────────┘
-         │                  │
-         ▼                  ▼
-   Anthropic API       FNS API
+手机浏览器                Claude Notes (Node.js)          FNS API (Go)           Obsidian
+    │                           │                           │                     │
+    │  HTTP/SSE                 │  HTTP Bearer Token        │  filesystem         │
+    ├──────────────────────────►├──────────────────────────►├────────────────────►│
+    │  /api/chat/stream         │  /api/vault               │                     │
+    │  /api/tasks               │  /api/notes               │  Life-Learing/      │
+    │  /api/login               │  /api/note               │  Life-Learning/     │
+    │                           │                           │  Uno/               │
+    ▼                           ▼                           ▼                     ▼
 ```
 
-## 目录结构
+## 部署位置
+
+| 服务 | 地址 | 进程 | 启动方式 |
+|------|------|------|----------|
+| **Web 终端** | `0.0.0.0:8000` | `node web-terminal.js` | `source local.config.sh && nohup node /path/to/web-terminal.js >> web.log 2>&1 &` |
+| **FNS API** | `127.0.0.1:9000` | 独立 Go 服务 | 系统级管理，不在本项目 |
+| **MCP Server** | stdio | `python3 server.py` | Claude Code 通过 `.mcp.json` 自动加载 |
+
+## 文件清单
 
 ```
 cloud_make_calender/
-├── CLAUDE.md              # 本文件 — Claude Code 项目文档
-├── format.skill           # 旧版日历事件格式约定（将被迁移到 .claude/skills/）
-├── .claude/
-│   ├── mcp.json           # MCP server 注册配置
-│   ├── settings.json      # 项目级 Claude Code 设置
-│   └── skills/
-│       ├── calendar-event.md  # 日历事件格式化 skill
-│       └── fns-notes.md       # 笔记操作 skill
+├── CLAUDE.md              ← 你正在读的文档
+├── .mcp.json              # Claude Code MCP 注册（项目根目录，不是 .claude/ 下）
+├── .claude/skills/        # Claude Code skill 文件
+│   ├── calendar-event.md
+│   └── fns-notes.md
 ├── src/
-│   ├── server.py          # ★ MCP 服务器（Python）
-│   ├── web-terminal.js    # ★ Web 终端（Node.js + Anthropic SDK）
-│   ├── fns-note-tool.js   # FNS CLI 工具（独立调试用）
-│   ├── package.json       # Node 依赖
-│   ├── requirements.txt   # Python 依赖
-│   ├── local.config.sh    # 本地环境变量（不入 git）
-│   ├── install.sh         # 安装脚本
-│   ├── start-all.sh       # 快速启动脚本
-│   └── node_modules/      # npm 依赖
+│   ├── web-terminal.js    ★ 主应用（1342 行）— HTTP 服务器 + Anthropic SDK + HTML UI
+│   ├── server.py          ★ MCP 服务器（272 行）— 供 Claude Code 调用
+│   ├── fns-note-tool.js   CLI 调试工具（85 行）
+│   ├── package.json       Node 依赖：@anthropic-ai/sdk
+│   ├── local.config.sh    ★ 环境变量 + Token（不入 git，.gitignore 已排除）
+│   ├── start-all.sh       快速启动脚本
+│   └── web.log            运行日志（不入 git）
 ```
 
-## 关键文件
+## 环境变量（local.config.sh）
 
-| 文件 | 语言 | 职责 |
+```bash
+# FNS 连接
+FNS_BASE_URL='http://127.0.0.1:9000'    # FNS 服务地址
+FNS_TOKEN='<JWT>'                       # FNS API 令牌
+FNS_DEFAULT_VAULT='Life-Learing'        # 默认 vault（408 条笔记）
+FNS_TASKS_PREFIX='000 PARA/020 Areas/AI任务/'  # 范式文件夹前缀
+
+# Claude API（DeepSeek 端点）
+ANTHROPIC_BASE_URL='https://api.deepseek.com/anthropic'
+ANTHROPIC_AUTH_TOKEN='<API_KEY>'
+ANTHROPIC_MODEL='deepseek-v4-pro'
+ANTHROPIC_MODELS='deepseek-v4-pro,deepseek-v4-flash'
+
+# 登录
+WEB_ACCESS_PASSWORD_HASH='<salt>:<hash>'  # pbkdf2(sha512, 100000轮)
+COOKIE_SECRET='<random>'                  # HMAC 签名密钥
+
+# 其他
+WEB_TERMINAL_HOST='0.0.0.0'
+WEB_TERMINAL_PORT='8000'
+```
+
+## API 端点
+
+### 公开（无需登录）
+| 方法 | 路径 | 说明 |
 |------|------|------|
-| `src/server.py` | Python 3.10+ | MCP JSON-RPC server，提供 10 个 FNS 工具 |
-| `src/web-terminal.js` | Node.js (CommonJS) | HTTP 服务器 + Web UI + Anthropic API tool-use loop |
-| `src/fns-note-tool.js` | Node.js (CommonJS) | CLI 工具，命令行直接操作 FNS |
+| GET | `/` | 主页面（需 cookie）或登录页 |
+| POST | `/api/login` | `{password}` → 设 cookie |
+| POST | `/api/logout` | 清除 cookie |
+| GET | `/api/ui/health` | 健康检查 |
 
-## 环境变量
+### 需登录
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/chat/stream` | SSE 流式对话 `{message, taskPath?, taskContent?, model?, history?}` |
+| POST | `/api/chat` | 非流式对话（降级用） |
+| GET | `/api/jobs` | 作业队列 |
+| POST | `/api/job/cancel` | 取消当前作业 |
+| POST | `/api/jobs/clear` | 清除历史作业 |
+| GET | `/api/config` | 模型列表 |
+| GET | `/api/tasks` | 范式列表 |
+| GET | `/api/task?path=` | 范式内容 |
+| GET | `/api/ui/vaults` | Vault 列表 |
 
-所有配置通过环境变量传递，本地开发时在 `src/local.config.sh` 中设置。
+## FNS API（本项目不实现，仅调用）
 
-| 变量 | 必须 | 默认值 | 说明 |
-|------|------|--------|------|
-| `FNS_TOKEN` | ✅ | — | FNS API Bearer Token |
-| `FNS_BASE_URL` | — | `http://127.0.0.1:9000` | FNS 服务地址 |
-| `FNS_DEFAULT_VAULT` | — | `Life-Learing` | 默认 vault 名 |
-| `FNS_TASKS_PREFIX` | — | `000 PARA/020 Areas/AI任务/` | AI 任务范式文件夹前缀 |
-| `ANTHROPIC_BASE_URL` | — | `https://api.deepseek.com/anthropic` | Anthropic 兼容 API 端点 |
-| `ANTHROPIC_AUTH_TOKEN` | Web 端需要 | — | API 认证 token |
-| `ANTHROPIC_MODEL` | — | `deepseek-v4-pro` | Web 端使用的模型 |
-| `ANTHROPIC_MODELS` | — | `deepseek-v4-pro,deepseek-v4-flash` | Web UI 下拉框可选模型（逗号分隔） |
-| `WEB_TERMINAL_HOST` | — | `0.0.0.0` | Web 服务器监听地址 |
-| `WEB_TERMINAL_PORT` | — | `8000` | Web 服务器监听端口 |
-| `APP_TIME_ZONE` | — | `Asia/Shanghai` | 应用时区 |
+| 端点 | 用途 |
+|------|------|
+| `GET /api/health` | 健康检查 |
+| `GET /api/vault` | 列出 vault（注意：单数路径） |
+| `GET /api/notes?vault=&keyword=&searchContent=true` | 搜索/列表笔记 |
+| `GET /api/note?vault=&path=` | 读取笔记 |
+| `POST /api/note` | 创建/覆盖笔记 `{vault, path, content}` |
+| `POST /api/note/append` | 追加 |
+| `POST /api/note/prepend` | 前插 |
+| `POST /api/note/replace` | 替换 |
 
-## 快速开始
+## 注意事项 & 禁区
 
-### 安装
+### web-terminal.js
+- **文件名是 CommonJS**（`require`），不是 ESM
+- **HTML 内联在模板字符串中**（单文件部署），CSS/JS 全部写在一个反引号里
+- **模板字符串转义陷阱**：在 `\`` 模板字面量里，`\w` `\s` `\n` `\*` 等不是合法 JS 字符串转义，反斜杠会被吃掉。正则中的 `\w` 必须写成 `\\w`
+- **流式响应**用 `textContent` 实时显示，结束后必须调 `formatMarkdown()` 转 HTML
+- **密码哈希**用 `crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512')`
+- **Cookie 签名**用 `crypto.createHmac('sha256', COOKIE_SECRET)`
 
-```bash
-cd src/
-./install.sh
-# 编辑 local.config.sh 填入 FNS_TOKEN 和 ANTHROPIC_API_KEY
+### server.py
+- **stdin/stdout 通信**，不要往 stdout 打日志（会破坏 JSON-RPC）
+- FNS API 返回 HTTP 200 + body `status:false` 时不是 HTTP 错误，需要在 `_request()` 里检测
+- `/api/vaults` 不存在，正确的路径是 `/api/vault`（单数）
+- 候选路径试探模式：逐个试，FNS 层 error 抛异常后试下一个
+
+### MCP 配置
+- 文件在**项目根目录 `.mcp.json`**（不是 `.claude/mcp.json` — 那个位置会被静默忽略）
+- Claude Code 需要 `~/.claude.json` 中 `enabledMcpjsonServers` 包含服务器名
+- env vars 通过 `env` 字段传递，不要用 `--env` 参数
+
+### 范式系统
+- 5 个范式存在 `Life-Learing` vault 的 `000 PARA/020 Areas/AI任务/` 下
+- 槽位绑定保存在 `localStorage.setItem('autoobsidian_slots', ...)`
+- 范式下拉框加载 `/api/tasks`，按需加载内容到 `paradigmCache`
+
+## UI 功能速览
+
+```
+手机端布局：
+┌──────────────────────┐
+│ C Claude Notes Pro 🗑 ready │  ← header 一行
+├──────────────────────┤
+│    聊天消息区域       │  ← main (flex-grow)
+│    (消息有左右边框色) │
+├──────────────────────┤
+│ [▾范式] [上下文] [+] [+] │  ← paradigm-row
+│ [输入框........] [发送] │  ← bar
+└──────────────────────┘
 ```
 
-### 启动 Web 终端（移动端使用）
+- **槽位**：单击切换范式，双击绑定当前范式，存 localStorage
+- **上下文按钮**：开启后附带最近 10 轮对话历史
+- **Pro/Flash**：模型切换按钮，点一次切换
+- **🗑**：清除历史，点一次变红确认，再点执行
+- **✕**：取消正在运行的任务
+- **状态指示器**：ready / running / queued / error
+
+## 修改密码
 
 ```bash
-cd src/
+node -e "const c=require('crypto');const s=c.randomBytes(16).toString('hex');console.log(s+':'+c.pbkdf2Sync('新密码',s,100000,64,'sha512').toString('hex'))"
+# 把输出替换 local.config.sh 里的 WEB_ACCESS_PASSWORD_HASH
+```
+
+## 快速重启
+
+```bash
+cd ~/cloud_make_calender/src
+ps aux | grep web-terminal | grep -v grep | awk '{print $2}' | xargs kill
 source local.config.sh
-npm run web
-# 打开 http://127.0.0.1:8000
+> web.log
+nohup node /home/Gragra/cloud_make_calender/src/web-terminal.js >> web.log 2>&1 &
+tail -3 web.log  # 确认 FNS: http://127.0.0.1:9000
 ```
-
-### 启动 MCP Server（供 Claude Code 使用）
-
-MCP server 已通过 `.claude/mcp.json` 注册，在项目目录启动 Claude Code 即自动加载。
-
-也可手动运行测试：
-```bash
-cd src/
-source local.config.sh
-python3 server.py
-# 然后通过 stdin 发送 JSON-RPC 消息
-```
-
-## MCP 工具列表
-
-`server.py` 提供以下工具（在 Claude Code 中直接可用）：
-
-| 工具名 | 说明 |
-|--------|------|
-| `vault_list` | 列出所有 vault |
-| `note_list` | 列出 vault 中的笔记 |
-| `note_search` | 按关键词搜索笔记 |
-| `note_get` | 读取笔记内容 |
-| `note_append` | 追加内容到笔记末尾 |
-| `note_prepend` | 插入内容到笔记开头 |
-| `note_replace` | 替换笔记中的指定文本 |
-| `note_patch_frontmatter` | 修改笔记 frontmatter |
-| `note_create_or_update` | 创建或覆盖笔记 |
-
-## 编码约定
-
-### Python（server.py）
-- 标准库 + `requests`，无其他依赖
-- `dataclass` 用于配置对象
-- 异常：抛 `RuntimeError`，由 `main()` 统一捕获并返回 JSON-RPC error
-- 工具 schema 在 `tool_schemas()` 中集中定义
-- 添加新 API：在 `FNSClient` 中加方法 → 在 `tool_schemas()` 中注册 → 在 `handle_call()` 中分发
-
-### Node.js（web-terminal.js, fns-note-tool.js）
-- **CommonJS**（`require`），不要用 ESM
-- 依赖：`@anthropic-ai/sdk`（Web 端），无其他运行时依赖
-- `web-terminal.js` 内联所有 HTML/CSS/JS（单文件部署）
-- 添加新工具：在 `FNS_TOOLS` 数组中加定义 → 在 `executeToolCall()` 中加 case → 工具自动对 Claude 可见
-- Web UI 样式：CSS 自定义属性在 `:root` 中集中定义，响应式断点：960px（桌面）、640px（平板）、380px（小手机）
-
-### 笔记格式（前Matter 约定）
-- Obsidian Markdown 文件，YAML frontmatter 在前
-- 日历事件：文件名为 `YYYY-MM-DD title.md`，详见 `.claude/skills/calendar-event.md`
-- AI 任务范式：存放在 `FNS_TASKS_PREFIX` 文件夹下
-
-## 常见开发任务
-
-### 添加新的 FNS API 操作
-
-1. `server.py` — 在 `FNSClient` 中添加方法（用多候选路径试探模式）
-2. `server.py` — 在 `tool_schemas()` 中添加 tool 定义
-3. `server.py` — 在 `handle_call()` 中添加分发
-4. `web-terminal.js` — 在 `FNS_TOOLS` 数组中添加 tool 定义
-5. `web-terminal.js` — 在 `executeToolCall()` 中添加 case
-6. （可选）`fns-note-tool.js` — 添加 CLI 命令
-
-### 修改 Claude 系统提示词
-
-编辑 `web-terminal.js` 中的 `buildSystemPrompt()` 函数。
-
-### 支持新的 Claude 模型
-
-修改 `local.config.sh` 中的 `CLAUDE_MODELS`（逗号分隔），Web UI 下拉框自动更新。
-
-## 注意事项
-
-- `local.config.sh` 包含 token，**不要提交到 git**
-- FNS API 的端点路径有多个备选（如 `/api/vaults` 和 `/api/vault`），代码中用多候选试探模式处理
-- Web 端的任务范式功能依赖 FNS 中存在 `FNS_TASKS_PREFIX` 路径
-- MCP server 使用 stdin/stdout 通信，不要往 stdout 输出日志（会破坏 JSON-RPC 协议）

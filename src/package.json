@@ -1,12 +1,11 @@
 {
   "name": "autoobsidian",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Claude-powered cloud notes bridge for Obsidian vaults via FNS API",
   "type": "commonjs",
   "scripts": {
-    "web": "bash -lc 'if [ -f ./local.config.sh ]; then source ./local.config.sh; fi; export TZ=\"${TZ:-Asia/Shanghai}\" APP_TIME_ZONE=\"${APP_TIME_ZONE:-Asia/Shanghai}\"; node web-terminal.js'",
-    "mcp": "bash -lc 'if [ -f ./local.config.sh ]; then source ./local.config.sh; fi; python3 server.py'"
+    "web": "bash -lc 'if [ -f ./local.config.sh ]; then source ./local.config.sh; fi; export TZ=\"${TZ:-Asia/Shanghai}\" APP_TIME_ZONE=\"${APP_TIME_ZONE:-Asia/Shanghai}\"; node web-terminal.js'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0"

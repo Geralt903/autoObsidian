@@ -55,7 +55,10 @@ class FNSClient:
             return None
         ctype = resp.headers.get("content-type", "")
         if "application/json" in ctype:
-            return resp.json()
+            data = resp.json()
+            if isinstance(data, dict) and data.get("status") is False:
+                raise RuntimeError(f"FNS {method} {path} error: {data.get('message', 'Unknown')} (code: {data.get('code')})")
+            return data
         return resp.text
 
     def health(self):
@@ -67,15 +70,12 @@ class FNSClient:
                 return self._request("GET", path)
             except Exception:
                 pass
-        return {"default_vault": self.cfg.default_vault}
+        raise RuntimeError("vault_list: all candidate paths failed")
 
     def note_list(self, vault: Optional[str] = None):
         vault = vault or self.cfg.default_vault
         candidates = [
             ("/api/notes", {"vault": vault}),
-            ("/api/notes", {"vaultName": vault}),
-            ("/api/vaults/notes", {"vault": vault}),
-            (f"/api/vaults/{urllib.parse.quote(vault)}/notes", None),
         ]
         last = None
         for path, params in candidates:
@@ -88,9 +88,8 @@ class FNSClient:
     def note_search(self, query: str, vault: Optional[str] = None):
         vault = vault or self.cfg.default_vault
         candidates = [
-            ("/api/search", {"q": query, "vault": vault}),
-            ("/api/search", {"query": query, "vault": vault}),
-            ("/api/notes/search", {"q": query, "vault": vault}),
+            ("/api/notes", {"keyword": query, "vault": vault, "searchContent": "true"}),
+            ("/api/notes", {"q": query, "vault": vault}),
         ]
         last = None
         for path, params in candidates:
@@ -118,7 +117,7 @@ class FNSClient:
     def note_append(self, path_or_id: str, content: str, vault: Optional[str] = None):
         vault = vault or self.cfg.default_vault
         body = {"path": path_or_id, "content": content, "vault": vault}
-        for path in ("/api/notes/append", f"/api/notes/{urllib.parse.quote(path_or_id, safe='')}/append"):
+        for path in ("/api/note/append", "/api/notes/append"):
             try:
                 return self._request("POST", path, json_body=body)
             except Exception:
@@ -128,7 +127,7 @@ class FNSClient:
     def note_prepend(self, path_or_id: str, content: str, vault: Optional[str] = None):
         vault = vault or self.cfg.default_vault
         body = {"path": path_or_id, "content": content, "vault": vault}
-        for path in ("/api/notes/prepend", f"/api/notes/{urllib.parse.quote(path_or_id, safe='')}/prepend"):
+        for path in ("/api/note/prepend", "/api/notes/prepend"):
             try:
                 return self._request("POST", path, json_body=body)
             except Exception:
@@ -138,7 +137,7 @@ class FNSClient:
     def note_replace(self, path_or_id: str, old: str, new: str, vault: Optional[str] = None):
         vault = vault or self.cfg.default_vault
         body = {"path": path_or_id, "old": old, "new": new, "vault": vault}
-        for path in ("/api/notes/replace", f"/api/notes/{urllib.parse.quote(path_or_id, safe='')}/replace"):
+        for path in ("/api/note/replace", "/api/notes/replace"):
             try:
                 return self._request("POST", path, json_body=body)
             except Exception:
@@ -148,7 +147,7 @@ class FNSClient:
     def note_patch_frontmatter(self, path_or_id: str, patch: Dict[str, Any], vault: Optional[str] = None):
         vault = vault or self.cfg.default_vault
         body = {"path": path_or_id, "frontmatter": patch, "vault": vault}
-        for path in ("/api/notes/frontmatter", f"/api/notes/{urllib.parse.quote(path_or_id, safe='')}/frontmatter"):
+        for path in ("/api/note/frontmatter", "/api/notes/frontmatter"):
             try:
                 return self._request("PATCH", path, json_body=body)
             except Exception:
@@ -158,9 +157,9 @@ class FNSClient:
     def note_create_or_update(self, path_or_id: str, content: str, vault: Optional[str] = None):
         vault = vault or self.cfg.default_vault
         body = {"path": path_or_id, "content": content, "vault": vault}
-        for path in ("/api/notes", f"/api/notes/{urllib.parse.quote(path_or_id, safe='')}"):
+        for path in ("/api/note", "/api/notes"):
             try:
-                return self._request("PUT", path, json_body=body)
+                return self._request("POST", path, json_body=body)
             except Exception:
                 pass
         raise RuntimeError("note_create_or_update failed")

@@ -39,14 +39,11 @@ fi
 
 echo "Bridge files ready in ${ROOT_DIR}"
 echo
-echo "MCP server is registered via .claude/mcp.json"
-echo "Claude Code will auto-load it when started in this project."
+echo "1) Add Codex MCP server if not already added:"
+echo "   codex mcp add fns-local -- ${PYTHON_BIN} ${ROOT_DIR}/server.py"
 echo
-echo "1) Start the mobile web app:"
+echo "2) Start the mobile web app:"
 echo "   npm run web"
-echo
-echo "2) Or test the MCP server directly:"
-echo "   ${PYTHON_BIN} ${ROOT_DIR}/server.py"
 echo
 echo "Web app will be on:"
 echo "   http://127.0.0.1:8000"
