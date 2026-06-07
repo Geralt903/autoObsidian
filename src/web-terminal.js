@@ -639,7 +639,6 @@ const html = `<!doctype html>
     ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(168,176,167,.2);border-radius:99px}::-webkit-scrollbar-thumb:hover{background:rgba(168,176,167,.35)}
     .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%) translateY(-10px);z-index:99;padding:10px 20px;border-radius:999px;background:rgba(16,20,19,.96);color:var(--ok);border:1px solid rgba(143,229,167,.25);font-size:13px;font-weight:650;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;backdrop-filter:blur(20px);box-shadow:0 4px 24px rgba(0,0,0,.4)}
     .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-    .app{width:100%;max-width:100vw;min-width:0;min-height:100%;min-height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow-x:hidden;position:relative}
     header{z-index:3;padding:8px max(14px,env(safe-area-inset-left)) 8px max(14px,env(safe-area-inset-right));border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:8px;background:rgba(12,15,16,.9);position:sticky;top:0;backdrop-filter:blur(20px);box-shadow:0 1px 8px rgba(0,0,0,.15)}
     .brand{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
     .mark{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 10px 30px rgba(218,165,32,.18);display:grid;place-items:center;color:#0b100e;font-weight:900;font-size:14px;flex-shrink:0}
@@ -658,7 +657,28 @@ const html = `<!doctype html>
     .state[data-status="queued"]{color:var(--accent-2);border-color:rgba(218,165,32,.35)}
     .state[data-status="error"]{color:var(--bad);border-color:rgba(255,145,135,.4)}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
-    main{padding:14px;overflow:auto;min-width:0}
+    /* conversation layout */
+    .conv-layout{display:flex;min-height:0;flex:1;overflow:hidden}
+    .conv-sidebar{width:260px;min-width:260px;border-right:1px solid rgba(255,255,255,.06);background:rgba(16,20,19,.5);display:flex;flex-direction:column;overflow:hidden}
+    .conv-sidebar-header{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:8px}
+    .conv-sidebar-header span{font-size:13px;font-weight:700;color:var(--muted)}
+    .conv-list{flex:1;overflow-y:auto;padding:6px 8px}
+    .conv-item{padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:3px;transition:all .15s;border:1px solid transparent}
+    .conv-item:hover{background:rgba(255,255,255,.03)}
+    .conv-item.active{background:rgba(212,165,116,.08);border-color:rgba(212,165,116,.2)}
+    .conv-item-title{font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .conv-item-meta{font-size:11px;color:var(--muted);margin-top:2px;display:flex;gap:8px}
+    .conv-item .status-dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0;margin-top:5px}
+    .status-dot.running{background:var(--accent);animation:pulse 1.2s infinite}
+    .status-dot.done{background:var(--ok)}
+    .status-dot.failed{background:var(--bad)}
+    .status-dot.queued{background:var(--accent-2)}
+    #newConvBtn{width:100%;height:36px;margin:8px;border:1px dashed var(--line);border-radius:8px;background:transparent;color:var(--muted);font-size:13px;cursor:pointer;font-weight:650}
+    #newConvBtn:hover{border-color:var(--accent-2);color:var(--text)}
+    main{padding:14px;overflow:auto;min-width:0;flex:1}
+    .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);gap:8px}
+    .empty-state .icon{font-size:40px;opacity:.3}
+    .empty-state .text{font-size:14px}
     select{width:100%;height:42px;border:1px solid var(--line);border-radius:8px;background:#111615;color:var(--text);padding:0 10px;font:inherit;min-width:0;max-width:100%;outline:none;text-overflow:ellipsis;transition:border-color .2s,box-shadow .2s}
     select:focus,textarea:focus{border-color:rgba(212,165,116,.5);box-shadow:0 0 0 3px rgba(212,165,116,.1),0 0 20px rgba(212,165,116,.05)}
     .thread{width:100%;max-width:880px;min-width:0;margin:0 auto;display:flex;flex-direction:column;gap:12px;padding-bottom:4px}
@@ -683,27 +703,38 @@ const html = `<!doctype html>
     button:hover{filter:brightness(1.06);transform:translateY(-1px);box-shadow:0 4px 12px rgba(212,165,116,.25)}
     button:active{transform:translateY(0) scale(.98)}
     button:disabled{opacity:.4;transform:none;box-shadow:none;filter:none}
+    button:disabled{opacity:.45}
     .paradigm-row{width:100%;max-width:880px;min-width:0;margin:0 auto 4px;display:flex;gap:6px;align-items:center}
     .paradigm-row select{width:auto;min-width:120px;max-width:45%;flex:0 1 auto;height:36px;font-size:14px;border-radius:999px;padding:0 12px}
-    .chips,.jobs{width:100%;max-width:880px;min-width:0;margin:0 auto 8px;display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
-    .chips::-webkit-scrollbar,.jobs::-webkit-scrollbar{display:none}
     .chip{height:36px;min-width:0;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--muted);border-radius:999px;padding:0 12px;font-size:13px;white-space:nowrap;font-weight:650;cursor:pointer;transition:all .2s}
     .chip:hover{border-color:rgba(255,255,255,.15);color:var(--text)}
-    #multiTurnBtn.on{color:var(--accent);border-color:rgba(212,165,116,.5);background:rgba(212,165,116,.08)}
+    #singleTurnBtn.on{color:var(--accent);border-color:rgba(212,165,116,.5);background:rgba(212,165,116,.08)}
     .slot{height:36px;min-width:36px;border:1px dashed var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:0 12px;font-size:13px;white-space:nowrap;font-weight:650;cursor:pointer;transition:all .2s}
     .slot:hover{border-color:rgba(255,255,255,.2);color:var(--text)}
     .slot.filled{border-style:solid;border-color:var(--line);background:rgba(255,255,255,.04)}
     .slot.active{border-color:rgba(100,210,193,.55);color:var(--accent-2);background:rgba(100,210,193,.1);box-shadow:0 0 12px rgba(100,210,193,.1)}
-    .job{height:32px;min-width:0;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:rgba(255,255,255,.03);padding:0 10px;font-size:12px;white-space:nowrap;font-weight:650}
-    .job.running{color:var(--accent);border-color:rgba(218,165,32,.35)}
-    .job.done{color:var(--ok)}
-    .job.failed{color:var(--bad)}
-    .retry-btn{height:28px;min-width:48px;margin-left:8px;font-size:12px;border:1px solid var(--accent-2);border-radius:6px;background:transparent;color:var(--accent-2);cursor:pointer;font-weight:650}
     @media (min-width: 960px){
       html,body{overflow:hidden}
-      .app{height:100dvh;grid-template-rows:auto minmax(0,1fr) auto}
+      .app{height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
       main{padding:18px 20px}
       form{padding:12px 20px 16px}
+    }
+    @media (max-width: 959px){
+      .conv-layout{flex-direction:column;position:relative}
+      .conv-sidebar{position:fixed;top:0;left:0;width:280px;height:100dvh;z-index:10;transform:translateX(-100%);transition:transform .25s;-webkit-overflow-scrolling:touch}
+      .conv-sidebar.open{transform:translateX(0);box-shadow:4px 0 24px rgba(0,0,0,.5)}
+      .conv-sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9}
+      .conv-sidebar-backdrop.open{display:block}
+      .conv-toggle{display:inline-flex!important;align-items:center;gap:4px;font-size:13px;color:var(--muted);cursor:pointer;border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:rgba(255,255,255,.03);white-space:nowrap}
+      .conv-toggle .arrow{font-size:10px}
+    }
+    /* mobile touch */
+    .conv-item{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+    .conv-item:active{background:rgba(255,255,255,.05)}
+    button, .chip, .slot, .model-btn, .conv-toggle{-webkit-tap-highlight-color:transparent}
+    @media (min-width: 960px){
+      .conv-toggle{display:none!important}
+      .conv-sidebar-backdrop{display:none!important}
     }
     @media (max-width: 640px){
       header{padding:6px 10px;gap:5px}
@@ -738,18 +769,28 @@ const html = `<!doctype html>
   <div class="app">
     <div class="toast" id="toast"></div>
     <header>
-      <div class="brand"><div class="mark">C</div><h1>Claude Notes</h1><span class="subtitle">手机笔记助理</span></div>
+      <div class="brand">
+        <button id="convToggle" class="conv-toggle" type="button"><span class="arrow">☰</span> 对话</button>
+        <div class="mark">C</div><h1>Claude Notes</h1><span class="subtitle">手机笔记助理</span>
+      </div>
       <button class="cancel-btn" id="cancelBtn" type="button" title="取消任务">✕</button>
       <button id="modelBtn" class="model-btn" type="button" title="切换模型">Pro</button>
-      <button id="clearHistory" class="trash-btn" type="button" title="清除历史">🗑</button>
+      <button id="clearHistory" class="trash-btn" type="button" title="清除所有记录">🗑</button>
       <div class="state" id="state">ready</div>
     </header>
-    <main><div class="thread" id="thread"><div class="msg assistant"><div class="meta">Claude</div>直接输入要做的事。</div></div><button class="scroll-hint" id="scrollHint" type="button" aria-label="滚动到底部">↓ 新消息</button></main>
+    <div class="conv-layout">
+      <div class="conv-sidebar-backdrop" id="sidebarBackdrop"></div>
+      <aside class="conv-sidebar" id="convSidebar">
+        <div class="conv-sidebar-header"><span>📋 对话记录</span></div>
+        <div class="conv-list" id="convList"></div>
+        <button id="newConvBtn">+ 新对话</button>
+      </aside>
+      <main><div class="thread" id="thread"><div class="empty-state"><div class="icon">💬</div><div class="text">选择对话或发送消息</div></div></div><button class="scroll-hint" id="scrollHint" type="button" aria-label="滚动到底部">↓ 新消息</button></main>
+    </div>
     <form id="form">
-      <div class="jobs" id="jobs"></div>
       <div class="paradigm-row">
         <select id="paradigmSelect"></select>
-        <button class="chip" id="multiTurnBtn" type="button">上下文</button>
+        <button class="chip" id="singleTurnBtn" type="button">单轮</button>
         <span style="flex:1"></span>
         <button class="slot" id="slot0" type="button" title="单击切换 · 双击绑定">+</button>
         <button class="slot" id="slot1" type="button" title="单击切换 · 双击绑定">+</button>
@@ -758,6 +799,7 @@ const html = `<!doctype html>
     </form>
   </div>
   <script>
+    // ── DOM refs ──
     const thread = document.getElementById('thread');
     const scrollHint = document.getElementById('scrollHint');
     const form = document.getElementById('form');
@@ -765,65 +807,128 @@ const html = `<!doctype html>
     const send = document.getElementById('send');
     const state = document.getElementById('state');
     const modelBtn = document.getElementById('modelBtn');
-    let currentModel = 'deepseek-v4-pro';
-    let availableModels = ['deepseek-v4-pro', 'deepseek-v4-flash'];
     const paradigmSelect = document.getElementById('paradigmSelect');
-    const jobsEl = document.getElementById('jobs');
+    const singleTurnBtn = document.getElementById('singleTurnBtn');
     const clearHistory = document.getElementById('clearHistory');
-    const multiTurnBtn = document.getElementById('multiTurnBtn');
     const cancelBtn = document.getElementById('cancelBtn');
     const charCount = document.getElementById('charCount');
     const toastEl = document.getElementById('toast');
-    let toastTimer = null;
-    function toast(msg) {
-      toastEl.textContent = msg;
-      toastEl.classList.add('show');
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => { toastEl.classList.remove('show'); }, 2000);
-    }
-    let streamingAbort = null;
-    const seenDone = new Set();
-    const streamedJobs = new Set();
-    const jobCache = new Map();
-    const paradigmCache = {}; // { path: content }
-    // Quick slots — persist to localStorage
+    const convList = document.getElementById('convList');
+    const convSidebar = document.getElementById('convSidebar');
+    const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+    const convToggle = document.getElementById('convToggle');
+    const newConvBtn = document.getElementById('newConvBtn');
+
+    // ── State ──
+    let currentModel = 'deepseek-v4-pro';
+    let availableModels = ['deepseek-v4-pro', 'deepseek-v4-flash'];
+    const paradigmCache = {};
     let slotParadigms;
     try { slotParadigms = JSON.parse(localStorage.getItem('autoobsidian_slots') || 'null'); } catch {}
     if (!Array.isArray(slotParadigms) || slotParadigms.length !== 2) slotParadigms = [null, null];
     const slotBtns = [document.getElementById('slot0'), document.getElementById('slot1')];
+    let conversations = [];
+    let activeConvId = null;
+    let singleTurn = false;
+    let streamingAbort = null;
+    let toastTimer = null;
 
-    function saveSlots() {
-      try { localStorage.setItem('autoobsidian_slots', JSON.stringify(slotParadigms)); } catch {}
+    // ── Conversation helpers ──
+    function loadConversations() {
+      try { conversations = JSON.parse(localStorage.getItem('claudenotes_convs') || '[]'); } catch { conversations = []; }
     }
+    function saveConversations() {
+      try { localStorage.setItem('claudenotes_convs', JSON.stringify(conversations)); } catch {}
+    }
+    function findConv(id) { return conversations.find(c => c.id === id); }
+    function newConversation(title) {
+      const d = new Date();
+      const dateStr = String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      const timeStr = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+      return {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+        title: dateStr + ' ' + (title || '新对话').slice(0, 50),
+        messages: [],
+        model: currentModel,
+        paradigm: paradigmSelect.value || '',
+        createdAt: new Date().toISOString(),
+        updatedAt: dateStr + ' ' + timeStr,
+        status: 'active'
+      };
+    }
+    function renderConvList() {
+      convList.innerHTML = conversations.slice().reverse().map(c => {
+        let statusClass = c.status || 'active';
+        return '<div class="conv-item' + (c.id === activeConvId ? ' active' : '') + '" data-id="' + c.id + '">' +
+          '<div style="display:flex;align-items:flex-start;gap:6px">' +
+          '<span class="status-dot ' + statusClass + '"></span>' +
+          '<div style="min-width:0">' +
+          '<div class="conv-item-title">' + escapeHtml(c.title) + '</div>' +
+          '<div class="conv-item-meta"><span>' + (c.updatedAt || '') + '</span><span>' + c.messages.length + ' 条</span></div>' +
+          '</div></div></div>';
+      }).join('');
+    }
+    function switchConv(id) {
+      activeConvId = id;
+      const conv = findConv(id);
+      if (!conv) return;
+      renderConvList();
+      renderMessages(conv);
+      closeSidebar();
+    }
+    function renderMessages(conv) {
+      if (!conv || !conv.messages.length) {
+        thread.innerHTML = '<div class="empty-state"><div class="icon">💬</div><div class="text">新对话</div></div>';
+        return;
+      }
+      thread.innerHTML = conv.messages.map(m => {
+        const role = m.role === 'user' ? 'user' : 'assistant';
+        const label = m.role === 'user' ? '你' : 'Claude';
+        return '<div class="msg ' + role + '"><div class="meta">' + label + ' · ' + (m.time || '') + '</div>' + formatMarkdown(m.content) + '</div>';
+      }).join('');
+      scrollToBottom();
+    }
+    function ensureActiveConv() {
+      if (activeConvId && findConv(activeConvId)) return;
+      const conv = newConversation('新对话');
+      conversations.unshift(conv);
+      activeConvId = conv.id;
+      saveConversations();
+      renderConvList();
+      thread.innerHTML = '<div class="empty-state"><div class="icon">💬</div><div class="text">新对话</div></div>';
+    }
+    function closeSidebar() {
+      convSidebar.classList.remove('open');
+      sidebarBackdrop.classList.remove('open');
+    }
+    function toggleSidebar() {
+      convSidebar.classList.toggle('open');
+      sidebarBackdrop.classList.toggle('open');
+    }
+    function escapeHtml(text) {
+      return text.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    }
+
+    // ── Slots ──
+    function saveSlots() { try { localStorage.setItem('autoobsidian_slots', JSON.stringify(slotParadigms)); } catch {} }
     function updateSlotUI() {
       const currentPath = paradigmSelect.value;
       slotParadigms.forEach((s, i) => {
         const btn = slotBtns[i];
         btn.classList.remove('filled', 'active');
-        if (s) {
-          btn.classList.add('filled');
-          btn.textContent = s.name;
-          if (currentPath === s.path) btn.classList.add('active');
-        } else {
-          btn.textContent = '+';
-        }
+        if (s) { btn.classList.add('filled'); btn.textContent = s.name; if (currentPath === s.path) btn.classList.add('active'); }
+        else { btn.textContent = '+'; }
       });
     }
     function activateSlot(i) {
-      const s = slotParadigms[i];
-      if (!s) return;
+      const s = slotParadigms[i]; if (!s) return;
       if (paradigmCache[s.path] === undefined) paradigmCache[s.path] = s.content;
-      paradigmSelect.value = s.path;
-      updateSlotUI();
+      paradigmSelect.value = s.path; updateSlotUI();
     }
     function bindSlot(i) {
-      const path = paradigmSelect.value;
-      if (!path) return;
-      const name = paradigmSelect.options[paradigmSelect.selectedIndex].text;
-      const content = paradigmCache[path] || '';
-      slotParadigms[i] = { path, name, content };
-      saveSlots();
-      updateSlotUI();
+      const path = paradigmSelect.value; if (!path) return;
+      slotParadigms[i] = { path, name: paradigmSelect.options[paradigmSelect.selectedIndex].text, content: paradigmCache[path] || '' };
+      saveSlots(); updateSlotUI();
     }
     slotBtns.forEach((btn, i) => {
       let clickTimer = null;
@@ -833,158 +938,101 @@ const html = `<!doctype html>
       });
     });
 
-    const MAX_HISTORY = 10; // max rounds to keep
-    const conversationHistory = []; // [{role, content}, ...]
-    let multiTurn = false;
-    function nowStr() {
-      const d = new Date();
-      return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
-    }
-    function escapeHtml(text) {
-      return text.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-    }
+    // ── Markdown ──
     function formatMarkdown(text) {
       let html = escapeHtml(text);
-      // Code blocks (must be before inline code)
       html = html.replace(/\x60\x60\x60(\\w*)\\n?([\\s\\S]*?)\x60\x60\x60/g, (_, lang, code) => '<pre style="background:rgba(0,0,0,.3);border:1px solid var(--line);border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:13px;margin:6px 0"><code>' + code.trim() + '</code></pre>');
-      // Inline code
       html = html.replace(/\x60([^\x60]+)\x60/g, '<code style="background:rgba(212,165,116,.15);color:var(--accent);padding:2px 5px;border-radius:3px;font-size:13px">$1</code>');
-      // Tables: match markdown table blocks
       html = html.replace(/((?:^\\|.+\\|\\n)+)(^\\|[-: |]+\\|\\n)((?:^\\|.+\\|\\n?)+)/gm, (_, head, sep, body) => {
-        const toRow = (line, tag) => {
-          const cells = line.split('|').filter(c => c.trim()).map(c => '<' + tag + ' style="padding:4px 10px;border:1px solid var(--line);text-align:left">' + c.trim() + '</' + tag + '>').join('');
-          return '<tr>' + cells + '</tr>';
-        };
+        const toRow = (line, tag) => { const cells = line.split('|').filter(c => c.trim()).map(c => '<' + tag + ' style="padding:4px 10px;border:1px solid var(--line);text-align:left">' + c.trim() + '</' + tag + '>').join(''); return '<tr>' + cells + '</tr>'; };
         const headerRow = toRow(head.trim().split('\\n').pop(), 'th');
         const bodyRows = body.trim().split('\\n').filter(Boolean).map(r => toRow(r, 'td')).join('');
         return '<table style="width:100%;border-collapse:collapse;margin:8px 0;font-size:13px"><thead>' + headerRow + '</thead><tbody>' + bodyRows + '</tbody></table>';
       });
-      // Headings
       html = html.replace(/^### (.+)$/gm, '<h4 style="margin:8px 0 4px;font-size:14px">$1</h4>');
       html = html.replace(/^## (.+)$/gm, '<h3 style="margin:10px 0 6px;font-size:16px">$1</h3>');
       html = html.replace(/^# (.+)$/gm, '<h2 style="margin:12px 0 6px;font-size:18px">$1</h2>');
-      // Bold + Italic
       html = html.replace(/\\*\\*([^\\*]+)\\*\\*/g, '<strong>$1</strong>');
       html = html.replace(/\\*([^\\*]+)\\*/g, '<em>$1</em>');
-      // Links
       html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" style="color:var(--accent-2);text-decoration:underline" target="_blank">$1</a>');
-      // List items
       html = html.replace(/^[*-] (.+)$/gm, '<span style="display:block;padding-left:8px">• $1</span>');
-      // Horizontal rules
       html = html.replace(/^---$/gm, '<hr style="border:0;border-top:1px solid var(--line);margin:12px 0">');
       return html;
     }
-    function add(role, text) {
-      const main = document.querySelector('main');
-      const atBottom = main.scrollHeight - main.scrollTop - main.clientHeight < 80;
+
+    // ── Helpers ──
+    function toast(msg) { toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.classList.remove('show'); }, 2000); }
+    function nowStr() { const d = new Date(); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0'); }
+    function scrollToBottom() { const last = thread.lastElementChild; if (last) { last.scrollIntoView({block:'end'}); scrollHint.classList.remove('visible'); } }
+
+    // ── Streaming bubble ──
+    function addStreamingBubble() {
       const div = document.createElement('div');
-      div.className = 'msg ' + role;
-      div.innerHTML = '<div class="meta">' + (role === 'user' ? '你' : 'Claude') + ' · ' + nowStr() + '</div>' + formatMarkdown(text);
-      thread.appendChild(div);
-      if (atBottom) { div.scrollIntoView({block:'end', behavior:'smooth'}); scrollHint.classList.remove('visible'); }
-      else { scrollHint.classList.add('visible'); }
-      return div;
-    }
-    function addStreamingBubble(role) {
-      const div = document.createElement('div');
-      div.className = 'msg ' + role;
-      div.innerHTML = '<div class="meta">' + (role === 'user' ? '你' : 'Claude') + ' · ' + nowStr() + '</div><span class="stream-text"></span><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
-      thread.appendChild(div);
-      div.scrollIntoView({block:'end'});
+      div.className = 'msg assistant';
+      div.innerHTML = '<div class="meta">Claude · ' + nowStr() + '</div><span class="stream-text"></span><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
+      thread.appendChild(div); scrollToBottom();
       const textEl = div.querySelector('.stream-text');
       let dotsEl = div.querySelector('.typing-dots');
       return {
         div,
-        appendText: function(delta) {
-          if (dotsEl) { dotsEl.remove(); dotsEl = null; }
-          textEl.textContent += delta;
-          div.scrollIntoView({block:'end'});
-        },
-        setText: function(text) {
-          if (dotsEl) { dotsEl.remove(); dotsEl = null; }
-          textEl.textContent = text;
-        },
-        showTool: function(name) {
-          if (dotsEl) { dotsEl.remove(); dotsEl = null; }
-          let toolNote = div.querySelector('.tool-note');
-          if (!toolNote) {
-            toolNote = document.createElement('div');
-            toolNote.className = 'tool-note';
-            div.appendChild(toolNote);
-          }
-          toolNote.textContent = '🔧 ' + name + ' ...';
-        },
-        finishTool: function(name, ok) {
-          const toolNote = div.querySelector('.tool-note');
-          if (toolNote) toolNote.textContent = (ok ? '✓ ' : '✗ ') + name;
-        },
-        finalize: function() {
-          if (dotsEl) { dotsEl.remove(); dotsEl = null; }
-        }
+        appendText: function(d) { if (dotsEl) { dotsEl.remove(); dotsEl = null; } textEl.textContent += d; scrollToBottom(); },
+        setText: function(t) { if (dotsEl) { dotsEl.remove(); dotsEl = null; } textEl.textContent = t; },
+        finalize: function() { if (dotsEl) { dotsEl.remove(); dotsEl = null; } }
       };
     }
-    let lastSubmittedText = '';
+
+    // ── Submit ──
     async function submit(text) {
       if (streamingAbort) { streamingAbort.abort(); streamingAbort = null; }
       const prompt = text.trim();
       if (!prompt) return;
       input.value = '';
       charCount.textContent = '';
-      lastSubmittedText = prompt;
-      add('user', prompt);
+
+      // Create or reuse conversation
+      if (singleTurn || !activeConvId || !findConv(activeConvId)) {
+        const conv = newConversation(prompt);
+        conversations.unshift(conv);
+        activeConvId = conv.id;
+      }
+      const conv = findConv(activeConvId);
+      conv.title = conv.messages.length === 0 ? (conv.title.split(' ').slice(0,1).join(' ') + ' ' + prompt.slice(0, 45)) : conv.title;
+      conv.status = 'running';
+      conv.messages.push({role: 'user', content: prompt, time: nowStr()});
+      saveConversations();
+      renderConvList();
+      renderMessages(conv);
+
       state.textContent = 'thinking';
       state.dataset.status = '';
       send.disabled = true;
-      const bubble = addStreamingBubble('assistant');
+      const bubble = addStreamingBubble();
       let fullText = '';
 
       try {
-        // Try SSE streaming first
         const resp = await fetch('/api/chat/stream', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({message: prompt, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel, history: multiTurn ? conversationHistory.slice(-MAX_HISTORY * 2) : []}),
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({message: prompt, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel}),
           signal: (streamingAbort = new AbortController()).signal
         });
-
-        if (!resp.ok) {
-          const errData = await resp.json().catch(() => ({error: 'HTTP ' + resp.status}));
-          throw new Error(errData.error || '请求失败');
-        }
-
+        if (!resp.ok) { const ed = await resp.json().catch(()=>({error:'HTTP '+resp.status})); throw new Error(ed.error||'请求失败'); }
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-
         while (true) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
+          const chunk = await reader.read(); if (chunk.done) break;
           buffer += decoder.decode(chunk.value, {stream: true});
-          const lines = buffer.split('\\n');
-          buffer = lines.pop() || '';
-
+          const lines = buffer.split('\\n'); buffer = lines.pop() || '';
           let eventType = '';
           for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith('data: ')) {
+            if (line.startsWith('event: ')) { eventType = line.slice(7).trim(); }
+            else if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));
-                if (eventType === 'meta') {
-                  streamedJobs.add(data.jobId);
-                } else if (eventType === 'text') {
-                  fullText += data.delta;
-                  bubble.appendText(data.delta);
-                } else if (eventType === 'tool') {
-                  if (data.status === 'running') bubble.showTool(data.name);
-                  else if (data.status === 'done') bubble.finishTool(data.name, true);
-                  else if (data.status === 'error') bubble.finishTool(data.name, false);
-                } else if (eventType === 'error') {
-                  bubble.setText('失败：' + escapeHtml(data.message));
-                } else if (eventType === 'done') {
-                  if (!fullText.trim()) bubble.setText(data.reply || '完成');
-                }
-              } catch(e) {}
+                if (eventType === 'text') { fullText += data.delta; bubble.appendText(data.delta); }
+                else if (eventType === 'done') { if (!fullText.trim()) bubble.setText(data.reply || '完成'); }
+                else if (eventType === 'error') { bubble.setText('失败：' + escapeHtml(data.message)); }
+              } catch {}
               eventType = '';
             }
           }
@@ -992,182 +1040,187 @@ const html = `<!doctype html>
         bubble.finalize();
         if (fullText.trim()) {
           bubble.div.querySelector('.stream-text').innerHTML = formatMarkdown(fullText.trim());
-          if (multiTurn) {
-            conversationHistory.push({role: 'user', content: prompt});
-            conversationHistory.push({role: 'assistant', content: fullText.trim()});
-            if (conversationHistory.length > MAX_HISTORY * 2) conversationHistory.splice(0, 2);
-          }
-        } else {
-          bubble.setText('完成');
+          conv.messages.push({role: 'assistant', content: fullText.trim(), time: nowStr()});
         }
+        conv.status = 'done';
+        conv.updatedAt = nowStr();
         state.textContent = 'ready';
       } catch (err) {
         if (err.name === 'AbortError') {
-          bubble.setText('[已取消]');
-          state.textContent = 'ready';
+          bubble.setText('[已取消]'); conv.status = 'done'; conv.updatedAt = nowStr(); state.textContent = 'ready';
         } else {
-          // Fallback: use job queue
+          // Fallback: job queue
           try {
             bubble.finalize();
-            const fallback = addStreamingBubble('assistant');
-            const jobResp = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message: prompt, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel, history: multiTurn ? conversationHistory.slice(-MAX_HISTORY * 2) : []})});
-            const jobData = await jobResp.json();
-            if (!jobResp.ok) throw new Error(jobData.error || '请求失败');
-            fallback.setText('已入队：' + jobData.job.id + '（' + jobData.job.model + '）…轮询中');
-            const pollId = setInterval(async () => {
+            const fb = addStreamingBubble();
+            const jr = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message: prompt, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel})});
+            const jd = await jr.json();
+            if (!jr.ok) throw new Error(jd.error||'请求失败');
+            fb.setText('处理中...');
+            const pid = setInterval(async () => {
               try {
-                const pollResp = await fetch('/api/jobs');
-                const pollData = await pollResp.json();
-                const found = pollData.jobs.find(j => j.id === jobData.job.id);
+                const pr = await fetch('/api/jobs'); const pd = await pr.json();
+                const found = pd.jobs.find(j => j.id === jd.job.id);
                 if (found && (found.status === 'done' || found.status === 'failed')) {
-                  clearInterval(pollId);
-                  fallback.finalize();
-                  if (found.status === 'done') add('assistant', found.reply);
-                  else add('assistant', '失败：' + found.error);
+                  clearInterval(pid); fb.finalize();
+                  if (found.status === 'done') {
+                    conv.messages.push({role: 'assistant', content: found.reply, time: nowStr()});
+                    renderMessages(conv);
+                  } else {
+                    conv.messages.push({role: 'assistant', content: '失败：' + found.error, time: nowStr()});
+                    renderMessages(conv);
+                  }
+                  conv.status = found.status === 'done' ? 'done' : 'failed';
+                  conv.updatedAt = nowStr();
+                  saveConversations(); renderConvList();
                   state.textContent = 'ready';
                 }
-              } catch(e) {}
+              } catch {}
             }, 2000);
             state.textContent = 'queued';
-          } catch (fallbackErr) {
-            add('assistant', '失败：' + (fallbackErr.message || '未知错误'));
-            state.textContent = 'error';
-            state.dataset.status = 'error';
+          } catch (fe) {
+            conv.status = 'failed';
+            conv.updatedAt = nowStr();
+            conv.messages.push({role: 'assistant', content: '失败：' + (fe.message||'未知错误'), time: nowStr()});
+            renderMessages(conv);
+            state.textContent = 'error'; state.dataset.status = 'error';
           }
         }
       } finally {
-        send.disabled = false;
-        input.focus();
-        streamingAbort = null;
+        send.disabled = false; input.focus(); streamingAbort = null;
+        saveConversations(); renderConvList();
+        if (conv.status === 'done' && singleTurn) { activeConvId = null; }
       }
     }
+
+    // ── Event listeners ──
     form.addEventListener('submit', e => { e.preventDefault(); submit(input.value); });
-    input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(input.value); } });
-    input.addEventListener('input', () => { const len = input.value.length; charCount.textContent = len > 0 ? len + ' 字符' : ''; });
+    input.addEventListener('keydown', e => { if ((e.key === 'Enter' && !e.shiftKey) || (e.key === 'Enter' && e.ctrlKey)) { e.preventDefault(); submit(input.value); } });
+    input.addEventListener('input', () => {
+      const len = input.value.length; charCount.textContent = len > 0 ? len + ' 字符' : '';
+      input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSidebar(); });
     cancelBtn.addEventListener('click', async () => {
       if (streamingAbort) { streamingAbort.abort(); streamingAbort = null; toast('已取消'); return; }
-      try {
-        const resp = await fetch('/api/job/cancel', {method:'POST'});
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || '取消失败');
-        toast('已取消任务');
-      } catch (err) {
-        add('assistant', '取消失败：' + err.message);
+      try { const r = await fetch('/api/job/cancel', {method:'POST'}); const d = await r.json(); if (!r.ok) throw new Error(d.error); toast('已取消'); } catch (e) { /* ignore */ }
+    });
+    scrollHint.addEventListener('click', () => { scrollToBottom(); });
+    convToggle.addEventListener('click', toggleSidebar);
+    sidebarBackdrop.addEventListener('click', closeSidebar);
+    // Swipe: right edge → open sidebar, left swipe on sidebar → close
+    let touchStartX = 0, touchStartY = 0;
+    document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; }, {passive:true});
+    document.addEventListener('touchend', e => {
+      const dx = (e.changedTouches[0]?.clientX||0) - touchStartX;
+      const dy = Math.abs((e.changedTouches[0]?.clientY||0) - touchStartY);
+      if (Math.abs(dx) > 60 && Math.abs(dx) > dy) {
+        if (dx > 0 && touchStartX < 30) { convSidebar.classList.add('open'); sidebarBackdrop.classList.add('open'); }
+        else if (dx < 0) closeSidebar();
       }
     });
-    scrollHint.addEventListener('click', () => { const last = thread.lastElementChild; if (last) { last.scrollIntoView({block:'end', behavior:'smooth'}); scrollHint.classList.remove('visible'); } });
-    multiTurnBtn.addEventListener('click', () => {
-      multiTurn = !multiTurn;
-      multiTurnBtn.textContent = '上下文: ' + (multiTurn ? '开' : '关');
-      multiTurnBtn.classList.toggle('on', multiTurn);
-      if (!multiTurn) conversationHistory.length = 0;
+    newConvBtn.addEventListener('click', () => {
+      const conv = newConversation('新对话');
+      conversations.unshift(conv);
+      activeConvId = conv.id;
+      saveConversations(); renderConvList();
+      thread.innerHTML = '<div class="empty-state"><div class="icon">💬</div><div class="text">新对话</div></div>';
+      closeSidebar();
     });
-    async function loadConfig() {
-      const resp = await fetch('/api/config');
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || '加载配置失败');
-      availableModels = data.models;
-      currentModel = data.defaultModel;
-      modelBtn.textContent = currentModel.includes('flash') ? 'Flash' : 'Pro';
+    convList.addEventListener('click', e => {
+      const item = e.target.closest('.conv-item');
+      if (item) switchConv(item.dataset.id);
+    });
+    // Long-press (mobile) or right-click (desktop) to delete single conversation
+    let longPressTimer = null;
+    convList.addEventListener('touchstart', e => {
+      const item = e.target.closest('.conv-item');
+      if (!item) return;
+      longPressTimer = setTimeout(() => { deleteConversation(item.dataset.id); }, 600);
+    }, {passive:true});
+    convList.addEventListener('touchend', () => { clearTimeout(longPressTimer); });
+    convList.addEventListener('touchmove', () => { clearTimeout(longPressTimer); });
+    convList.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      const item = e.target.closest('.conv-item');
+      if (item) deleteConversation(item.dataset.id);
+    });
+    function deleteConversation(id) {
+      if (!confirm('删除这条对话？')) return;
+      conversations = conversations.filter(c => c.id !== id);
+      if (activeConvId === id) {
+        activeConvId = conversations.length > 0 ? conversations[0].id : null;
+        if (activeConvId) renderMessages(findConv(activeConvId));
+        else thread.innerHTML = '<div class="empty-state"><div class="icon">💬</div><div class="text">选择对话或发送消息</div></div>';
+      }
+      saveConversations(); renderConvList(); toast('已删除');
     }
+    singleTurnBtn.addEventListener('click', () => {
+      singleTurn = !singleTurn;
+      singleTurnBtn.classList.toggle('on', singleTurn);
+      toast(singleTurn ? '单轮模式：每次新建对话' : '连续模式：在同一对话中继续');
+    });
     modelBtn.addEventListener('click', () => {
       const idx = availableModels.indexOf(currentModel);
       currentModel = availableModels[(idx + 1) % availableModels.length] || currentModel;
       modelBtn.textContent = currentModel.includes('flash') ? 'Flash' : 'Pro';
     });
-    async function loadJobs() {
-      const resp = await fetch('/api/jobs');
-      const data = await resp.json();
-      if (!resp.ok) return;
-      data.jobs.forEach(job => jobCache.set(job.id, job));
-      const running = data.jobs.find(j => j.status === 'running');
-      const queued = data.jobs.filter(j => j.status === 'queued').length;
-      if (running) { state.textContent = 'running ' + running.model; state.dataset.status = 'running'; cancelBtn.classList.add('visible'); }
-      else if (queued) { state.textContent = queued + ' 个排队中'; state.dataset.status = 'queued'; cancelBtn.classList.add('visible'); }
-      else if (!streamingAbort) { state.textContent = 'ready'; state.dataset.status = ''; cancelBtn.classList.remove('visible'); }
-      jobsEl.innerHTML = data.jobs.slice(0, 8).map(job => {
-        if (streamedJobs.has(job.id)) return '';
-        return '<button class="job ' + job.status + '" type="button" data-id="' + job.id + '" title="点击查看详情">' + job.status + ' · ' + job.model + '</button>';
-      }).filter(Boolean).join('');
-      data.jobs.forEach(job => {
-        if (streamedJobs.has(job.id)) return;
-        if ((job.status === 'done' || job.status === 'failed') && !seenDone.has(job.id)) {
-          seenDone.add(job.id);
-          add('assistant', job.status === 'done' ? job.reply : ('失败：' + job.error));
-        }
-      });
-    }
-    jobsEl.addEventListener('click', (e) => {
-      const btn = e.target.closest('.job');
-      if (!btn) return;
-      const job = jobCache.get(btn.dataset.id);
-      if (!job) return;
-      const detail = job.status === 'done' ? job.reply : (job.status === 'failed' ? '失败：' + job.error : '排队中...');
-      if (detail) add('assistant', '📋 任务 ' + job.id + '（' + job.model + '）\\n' + detail);
-    });
-    async function loadParadigms() {
-      state.textContent = 'loading';
-      try {
-        const resp = await fetch('/api/tasks');
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || '加载范式失败');
-        paradigmSelect.innerHTML = data.tasks.map(t => '<option value="' + t.path.replace(/"/g,'&quot;') + '">' + t.name + '</option>').join('');
-        if (data.tasks[0]) {
-          const detailResp = await fetch('/api/task?path=' + encodeURIComponent(data.tasks[0].path));
-          const detailData = await detailResp.json();
-          if (detailResp.ok) paradigmCache[data.tasks[0].path] = detailData.content || '';
-        }
-        // Restore saved slot content into cache
-        slotParadigms.forEach(s => { if (s && s.content) paradigmCache[s.path] = s.content; });
-        updateSlotUI();
-        state.textContent = 'ready';
-      } catch (err) {
-        state.textContent = 'error';
-        state.dataset.status = 'error';
-        add('assistant', '范式加载失败：' + err.message);
-      }
-    }
-    paradigmSelect.addEventListener('change', async () => {
-      const path = paradigmSelect.value;
-      updateSlotUI();
-      if (!path || paradigmCache[path]) return;
-      try {
-        const resp = await fetch('/api/task?path=' + encodeURIComponent(path));
-        const data = await resp.json();
-        if (resp.ok) paradigmCache[path] = data.content || '';
-      } catch {}
-    });
-    let clearPending = false;
-    let clearTimer = null;
+
+    // ── Clear history ──
+    let clearPending = false, clearTimer = null;
     clearHistory.addEventListener('click', async () => {
       if (!clearPending) {
-        clearPending = true;
-        clearHistory.classList.add('confirm');
+        clearPending = true; clearHistory.classList.add('confirm');
         clearTimer = setTimeout(() => { clearPending = false; clearHistory.classList.remove('confirm'); }, 3000);
         return;
       }
-      clearTimeout(clearTimer);
-      clearPending = false;
-      clearHistory.classList.remove('confirm');
-      try {
-        const resp = await fetch('/api/jobs/clear', {method:'POST'});
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || '清除失败');
-        seenDone.clear();
-        streamedJobs.clear();
-        conversationHistory.length = 0;
-        thread.innerHTML = '<div class="msg assistant"><div class="meta">Claude</div>历史已清除。</div>';
-        await loadJobs();
-      } catch (err) {
-        add('assistant', '失败：' + err.message);
-      }
+      clearTimeout(clearTimer); clearPending = false; clearHistory.classList.remove('confirm');
+      conversations = []; activeConvId = null;
+      saveConversations(); renderConvList();
+      thread.innerHTML = '<div class="empty-state"><div class="icon">🗑</div><div class="text">所有记录已清除</div></div>';
+      try { await fetch('/api/jobs/clear', {method:'POST'}); } catch {}
     });
+
+    // ── Config & Paradigms ──
+    async function loadConfig() {
+      const r = await fetch('/api/config'); const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      availableModels = d.models; currentModel = d.defaultModel;
+      modelBtn.textContent = currentModel.includes('flash') ? 'Flash' : 'Pro';
+    }
+    async function loadParadigms() {
+      const r = await fetch('/api/tasks'); const d = await r.json();
+      if (!r.ok) throw new Error(d.error);
+      paradigmSelect.innerHTML = d.tasks.map(t => '<option value="' + t.path.replace(/"/g,'&quot;') + '">' + t.name + '</option>').join('');
+      if (d.tasks[0]) {
+        const dr = await fetch('/api/task?path=' + encodeURIComponent(d.tasks[0].path));
+        const dd = await dr.json();
+        if (dr.ok) paradigmCache[d.tasks[0].path] = dd.content || '';
+      }
+      slotParadigms.forEach(s => { if (s && s.content) paradigmCache[s.path] = s.content; });
+      updateSlotUI();
+    }
+    paradigmSelect.addEventListener('change', async () => {
+      updateSlotUI();
+      const path = paradigmSelect.value;
+      if (!path || paradigmCache[path]) return;
+      try { const r = await fetch('/api/task?path=' + encodeURIComponent(path)); const d = await r.json(); if (r.ok) paradigmCache[path] = d.content||''; } catch {}
+    });
+
+    // ── Init ──
     state.textContent = '加载中...';
-    Promise.all([loadConfig(), loadParadigms(), loadJobs()]).then(() => { state.textContent = 'ready'; }).catch(err => { state.textContent = 'error'; state.dataset.status = 'error'; add('assistant', '加载失败：' + err.message + '（请检查网络或刷新重试）'); });
-    setInterval(loadJobs, 2500);
+    loadConversations();
+    renderConvList();
+    if (conversations.length > 0) {
+      activeConvId = conversations[0].id;
+      renderMessages(conversations[0]);
+    }
+    Promise.all([loadConfig(), loadParadigms()]).then(() => { state.textContent = 'ready'; }).catch(err => { state.textContent = 'error'; state.dataset.status = 'error'; });
   </script>
 </body>
 </html>`;
+
+// ── HTTP Server ──────────────────────────────────────────────────
 
 // ── HTTP Server ──────────────────────────────────────────────────
 
