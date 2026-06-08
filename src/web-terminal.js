@@ -3,6 +3,7 @@ const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const { URL } = require('url');
 const Anthropic = require('@anthropic-ai/sdk').default;
 const XLSX = require('xlsx');
@@ -29,6 +30,12 @@ const MAX_TOOL_ROUNDS = parseInt(process.env.CLAUDE_MAX_TOOL_ROUNDS || '100', 10
 const JOB_HISTORY_LIMIT = parseInt(process.env.JOB_HISTORY_LIMIT || '20', 10);
 const JOB_LOG_PATH = process.env.JOB_LOG_PATH || path.join(__dirname, 'job-events.log');
 const JOB_LOG_MAX_BYTES = parseInt(process.env.JOB_LOG_MAX_BYTES || '5242880', 10);
+const DATA_TOOL_MAX_CHARS = parseInt(process.env.DATA_TOOL_MAX_CHARS || '1000000', 10);
+const DATA_TOOL_MAX_ROWS = parseInt(process.env.DATA_TOOL_MAX_ROWS || '20000', 10);
+const TERMINAL_TOOL_ENABLED = process.env.TERMINAL_TOOL_ENABLED !== '0';
+const TERMINAL_DEFAULT_CWD = process.env.TERMINAL_DEFAULT_CWD || path.resolve(__dirname, '..');
+const TERMINAL_TIMEOUT_MS = parseInt(process.env.TERMINAL_TIMEOUT_MS || '120000', 10);
+const TERMINAL_MAX_OUTPUT_CHARS = parseInt(process.env.TERMINAL_MAX_OUTPUT_CHARS || '60000', 10);
 
 // ── Auth config ──────────────────────────────────────────────────
 const PASSWORD_HASH = process.env.WEB_ACCESS_PASSWORD_HASH || '';
@@ -206,6 +213,110 @@ const FNS_TOOLS = [
         vault: { type: 'string', description: `Vault 名称，默认 ${DEFAULT_VAULT}` },
       },
       required: ['path', 'old', 'new'],
+    },
+  },
+  {
+    name: 'data_profile',
+    description: '分析 CSV/TSV/Markdown 表格文本，返回列名、行数、样例、缺失值、唯一值数量和数值列统计。适合先了解账单、导出的 xlsx/csv、清单类附件。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '表格文本内容，支持 CSV、TSV 或 Markdown 表格' },
+        delimiter: { type: 'string', description: '分隔符，可填 auto、comma、tab、semicolon、pipe，默认 auto' },
+        hasHeader: { type: 'boolean', description: '第一行是否为表头，默认 true' },
+        maxRows: { type: 'integer', description: `最多处理行数，默认 ${DATA_TOOL_MAX_ROWS}` },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'data_filter_sort',
+    description: '对 CSV/TSV/Markdown 表格文本做筛选、选择列、排序和限制返回行数。用于从附件中找特定日期、类别、金额范围等记录。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '表格文本内容' },
+        delimiter: { type: 'string', description: '分隔符，可填 auto、comma、tab、semicolon、pipe，默认 auto' },
+        hasHeader: { type: 'boolean', description: '第一行是否为表头，默认 true' },
+        select: { type: 'array', items: { type: 'string' }, description: '要返回的列名列表，省略则返回全部列' },
+        filters: {
+          type: 'array',
+          description: '筛选条件数组。op 支持 eq、neq、contains、gt、gte、lt、lte、between、in、empty、not_empty',
+          items: {
+            type: 'object',
+            properties: {
+              column: { type: 'string' },
+              op: { type: 'string' },
+              value: {},
+              value2: {},
+            },
+            required: ['column', 'op'],
+          },
+        },
+        sortBy: { type: 'string', description: '排序列名' },
+        sortDir: { type: 'string', description: 'asc 或 desc，默认 asc' },
+        limit: { type: 'integer', description: '最多返回行数，默认 50' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'data_group',
+    description: '对 CSV/TSV/Markdown 表格文本分组汇总。支持 count、sum、avg、min、max，用于账单按日期/类别汇总、统计金额等。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '表格文本内容' },
+        delimiter: { type: 'string', description: '分隔符，可填 auto、comma、tab、semicolon、pipe，默认 auto' },
+        hasHeader: { type: 'boolean', description: '第一行是否为表头，默认 true' },
+        groupBy: { type: 'array', items: { type: 'string' }, description: '分组列名列表' },
+        metrics: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              op: { type: 'string', description: 'count、sum、avg、min、max' },
+              column: { type: 'string', description: 'count 可省略 column' },
+              as: { type: 'string', description: '输出字段名' },
+            },
+            required: ['op'],
+          },
+        },
+        sortBy: { type: 'string', description: '排序列名' },
+        sortDir: { type: 'string', description: 'asc 或 desc，默认 asc' },
+        limit: { type: 'integer', description: '最多返回组数，默认 100' },
+      },
+      required: ['text', 'groupBy', 'metrics'],
+    },
+  },
+  {
+    name: 'data_dedupe',
+    description: '对 CSV/TSV/Markdown 表格文本去重，返回重复统计和去重后的行。用于账单/清单附件按日期、金额、备注等字段判断重复。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '表格文本内容' },
+        delimiter: { type: 'string', description: '分隔符，可填 auto、comma、tab、semicolon、pipe，默认 auto' },
+        hasHeader: { type: 'boolean', description: '第一行是否为表头，默认 true' },
+        keyColumns: { type: 'array', items: { type: 'string' }, description: '用于判断重复的列名；省略时用整行' },
+        keep: { type: 'string', description: 'first 或 last，默认 first' },
+        limit: { type: 'integer', description: '最多返回重复样例数，默认 50' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'terminal_exec',
+    description: '执行本机真实终端命令，拥有运行当前 Node 服务用户的完整 shell 权限。用于用户明确要求执行命令、读写本地文件、运行测试、安装依赖、启动脚本或检查系统状态时。此工具会执行 bash -lc，不做命令沙箱。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        cmd: { type: 'string', description: '要执行的 shell 命令，会通过 bash -lc 执行' },
+        cwd: { type: 'string', description: `工作目录，默认 ${TERMINAL_DEFAULT_CWD}` },
+        timeoutMs: { type: 'integer', description: `超时时间毫秒，默认 ${TERMINAL_TIMEOUT_MS}，最大 600000` },
+        maxOutputChars: { type: 'integer', description: `最多返回 stdout/stderr 字符数，默认 ${TERMINAL_MAX_OUTPUT_CHARS}` },
+      },
+      required: ['cmd'],
     },
   },
 ];
@@ -401,6 +512,301 @@ function emitJobProgress(res, job, stage, progressText, extra = {}) {
   return payload;
 }
 
+function dataToolText(input) {
+  const text = String(input?.text || '');
+  if (!text.trim()) throw new Error('data tool text is required');
+  if (text.length > DATA_TOOL_MAX_CHARS) {
+    throw new Error(`数据过大：${text.length} 字符，当前上限 ${DATA_TOOL_MAX_CHARS}。请先缩小范围或拆分处理。`);
+  }
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function delimiterValue(name, sample) {
+  const v = String(name || 'auto').toLowerCase();
+  if (v === 'comma') return ',';
+  if (v === 'tab') return '\t';
+  if (v === 'semicolon') return ';';
+  if (v === 'pipe') return '|';
+  const first = String(sample || '').split('\n').find((line) => line.trim()) || '';
+  const counts = [
+    [',', (first.match(/,/g) || []).length],
+    ['\t', (first.match(/\t/g) || []).length],
+    [';', (first.match(/;/g) || []).length],
+    ['|', (first.match(/\|/g) || []).length],
+  ];
+  counts.sort((a, b) => b[1] - a[1]);
+  return counts[0][1] > 0 ? counts[0][0] : ',';
+}
+
+function parseDelimitedLine(line, delimiter) {
+  const out = [];
+  let cur = '';
+  let quote = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quote && line[i + 1] === '"') { cur += '"'; i++; }
+      else quote = !quote;
+    } else if (ch === delimiter && !quote) {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur);
+  return out.map((v) => v.trim());
+}
+
+function parseTable(input = {}) {
+  const text = dataToolText(input);
+  const maxRows = Math.min(Math.max(parseInt(input.maxRows || DATA_TOOL_MAX_ROWS, 10) || DATA_TOOL_MAX_ROWS, 1), DATA_TOOL_MAX_ROWS);
+  const hasHeader = input.hasHeader !== false;
+  const lines = text.split('\n').filter((line) => line.trim());
+  const markdown = lines.some((line) => /^\s*\|/.test(line));
+  let delimiter = delimiterValue(input.delimiter, text);
+  let rawRows;
+  if (markdown) {
+    delimiter = '|';
+    rawRows = lines
+      .filter((line) => line.includes('|') && !/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line))
+      .map((line) => line.replace(/^\s*\|/, '').replace(/\|\s*$/, ''))
+      .map((line) => parseDelimitedLine(line, '|'));
+  } else {
+    rawRows = lines.map((line) => parseDelimitedLine(line, delimiter));
+  }
+  if (!rawRows.length) throw new Error('未解析到表格行');
+  let headers;
+  let rows;
+  if (hasHeader) {
+    headers = rawRows[0].map((h, i) => h || `col${i + 1}`);
+    rows = rawRows.slice(1, maxRows + 1);
+  } else {
+    const width = Math.max(...rawRows.map((r) => r.length));
+    headers = Array.from({ length: width }, (_, i) => `col${i + 1}`);
+    rows = rawRows.slice(0, maxRows);
+  }
+  const seen = new Map();
+  headers = headers.map((h, i) => {
+    const base = String(h || `col${i + 1}`).trim() || `col${i + 1}`;
+    const n = (seen.get(base) || 0) + 1;
+    seen.set(base, n);
+    return n === 1 ? base : `${base}_${n}`;
+  });
+  const objects = rows.map((row) => {
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = row[i] === undefined ? '' : row[i]; });
+    return obj;
+  });
+  return { headers, rows: objects, rowCount: Math.max(rawRows.length - (hasHeader ? 1 : 0), 0), parsedRows: objects.length, truncated: rawRows.length - (hasHeader ? 1 : 0) > objects.length, delimiter };
+}
+
+function numericValue(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const cleaned = String(value).replace(/[,\s¥￥$]/g, '');
+  if (!/^[-+]?\d*\.?\d+(e[-+]?\d+)?$/i.test(cleaned)) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+function compareValues(a, b) {
+  const na = numericValue(a);
+  const nb = numericValue(b);
+  if (na !== null && nb !== null) return na - nb;
+  return String(a ?? '').localeCompare(String(b ?? ''), 'zh-CN', { numeric: true });
+}
+
+function applyDataFilters(rows, filters = []) {
+  if (!Array.isArray(filters) || !filters.length) return rows;
+  return rows.filter((row) => filters.every((f) => {
+    const value = row[f.column] ?? '';
+    const op = String(f.op || 'eq').toLowerCase();
+    const text = String(value);
+    const target = f.value;
+    const n = numericValue(value);
+    const tn = numericValue(target);
+    if (op === 'eq') return text === String(target ?? '');
+    if (op === 'neq') return text !== String(target ?? '');
+    if (op === 'contains') return text.includes(String(target ?? ''));
+    if (op === 'empty') return !text.trim();
+    if (op === 'not_empty') return Boolean(text.trim());
+    if (op === 'in') return Array.isArray(target) ? target.map(String).includes(text) : String(target ?? '').split(',').map((x) => x.trim()).includes(text);
+    if (op === 'gt') return n !== null && tn !== null && n > tn;
+    if (op === 'gte') return n !== null && tn !== null && n >= tn;
+    if (op === 'lt') return n !== null && tn !== null && n < tn;
+    if (op === 'lte') return n !== null && tn !== null && n <= tn;
+    if (op === 'between') {
+      const t2 = numericValue(f.value2);
+      return n !== null && tn !== null && t2 !== null && n >= tn && n <= t2;
+    }
+    return true;
+  }));
+}
+
+function dataProfile(input) {
+  const table = parseTable(input);
+  const columns = table.headers.map((h) => {
+    const values = table.rows.map((r) => r[h]);
+    const filled = values.filter((v) => String(v ?? '').trim()).length;
+    const unique = new Set(values.map((v) => String(v ?? ''))).size;
+    const nums = values.map(numericValue).filter((n) => n !== null);
+    const col = { name: h, filled, missing: table.parsedRows - filled, unique };
+    if (nums.length) {
+      const sum = nums.reduce((a, b) => a + b, 0);
+      col.numeric = {
+        count: nums.length,
+        sum: Number(sum.toFixed(6)),
+        avg: Number((sum / nums.length).toFixed(6)),
+        min: Math.min(...nums),
+        max: Math.max(...nums),
+      };
+    }
+    return col;
+  });
+  return { rowCount: table.rowCount, parsedRows: table.parsedRows, truncated: table.truncated, delimiter: table.delimiter, headers: table.headers, sample: table.rows.slice(0, 5), columns };
+}
+
+function dataFilterSort(input) {
+  const table = parseTable(input);
+  let rows = applyDataFilters(table.rows, input.filters);
+  if (input.sortBy) {
+    const dir = String(input.sortDir || 'asc').toLowerCase() === 'desc' ? -1 : 1;
+    rows = rows.slice().sort((a, b) => compareValues(a[input.sortBy], b[input.sortBy]) * dir);
+  }
+  const select = Array.isArray(input.select) && input.select.length ? input.select : table.headers;
+  const limit = Math.min(Math.max(parseInt(input.limit || '50', 10) || 50, 1), 500);
+  const limited = rows.slice(0, limit).map((row) => {
+    const obj = {};
+    select.forEach((h) => { obj[h] = row[h] ?? ''; });
+    return obj;
+  });
+  return { inputRows: table.rowCount, matchedRows: rows.length, returnedRows: limited.length, truncated: rows.length > limited.length, rows: limited };
+}
+
+function dataGroup(input) {
+  const table = parseTable(input);
+  const groupBy = Array.isArray(input.groupBy) ? input.groupBy : [];
+  const metrics = Array.isArray(input.metrics) ? input.metrics : [];
+  if (!groupBy.length) throw new Error('groupBy is required');
+  if (!metrics.length) throw new Error('metrics is required');
+  const groups = new Map();
+  for (const row of table.rows) {
+    const keyParts = groupBy.map((h) => row[h] ?? '');
+    const key = JSON.stringify(keyParts);
+    if (!groups.has(key)) groups.set(key, { keyParts, rows: [] });
+    groups.get(key).rows.push(row);
+  }
+  let rows = Array.from(groups.values()).map((g) => {
+    const out = {};
+    groupBy.forEach((h, i) => { out[h] = g.keyParts[i]; });
+    for (const metric of metrics) {
+      const op = String(metric.op || 'count').toLowerCase();
+      const col = metric.column || '';
+      const name = metric.as || (col ? `${op}_${col}` : op);
+      const nums = col ? g.rows.map((r) => numericValue(r[col])).filter((n) => n !== null) : [];
+      if (op === 'count') out[name] = g.rows.length;
+      else if (op === 'sum') out[name] = Number(nums.reduce((a, b) => a + b, 0).toFixed(6));
+      else if (op === 'avg') out[name] = nums.length ? Number((nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(6)) : null;
+      else if (op === 'min') out[name] = nums.length ? Math.min(...nums) : null;
+      else if (op === 'max') out[name] = nums.length ? Math.max(...nums) : null;
+    }
+    return out;
+  });
+  if (input.sortBy) {
+    const dir = String(input.sortDir || 'asc').toLowerCase() === 'desc' ? -1 : 1;
+    rows = rows.sort((a, b) => compareValues(a[input.sortBy], b[input.sortBy]) * dir);
+  }
+  const limit = Math.min(Math.max(parseInt(input.limit || '100', 10) || 100, 1), 500);
+  return { inputRows: table.rowCount, groupCount: rows.length, returnedRows: Math.min(rows.length, limit), truncated: rows.length > limit, rows: rows.slice(0, limit) };
+}
+
+function dataDedupe(input) {
+  const table = parseTable(input);
+  const keyColumns = Array.isArray(input.keyColumns) && input.keyColumns.length ? input.keyColumns : table.headers;
+  const keepLast = String(input.keep || 'first').toLowerCase() === 'last';
+  const map = new Map();
+  const dupes = [];
+  table.rows.forEach((row, index) => {
+    const key = JSON.stringify(keyColumns.map((h) => String(row[h] ?? '').trim()));
+    if (map.has(key)) {
+      const first = map.get(key);
+      first.count++;
+      if (keepLast) first.row = row;
+      if (dupes.length < Math.min(parseInt(input.limit || '50', 10) || 50, 100)) dupes.push({ key: keyColumns.reduce((obj, h) => ({ ...obj, [h]: row[h] ?? '' }), {}), firstIndex: first.firstIndex, duplicateIndex: index });
+    } else {
+      map.set(key, { row, count: 1, firstIndex: index });
+    }
+  });
+  const rows = Array.from(map.values()).map((item) => item.row);
+  return { inputRows: table.rowCount, uniqueRows: rows.length, duplicateRows: table.rows.length - rows.length, keyColumns, duplicates: dupes, rows: rows.slice(0, Math.min(parseInt(input.limit || '50', 10) || 50, 100)) };
+}
+
+function appendLimited(target, chunk, limit) {
+  const next = target + chunk;
+  if (next.length <= limit) return { text: next, truncated: false };
+  return { text: next.slice(0, limit), truncated: true };
+}
+
+function runTerminalCommand(input = {}) {
+  if (!TERMINAL_TOOL_ENABLED) throw new Error('terminal_exec is disabled by TERMINAL_TOOL_ENABLED=0');
+  const cmd = String(input.cmd || '').trim();
+  if (!cmd) throw new Error('terminal_exec cmd is required');
+  const cwd = input.cwd ? path.resolve(String(input.cwd)) : TERMINAL_DEFAULT_CWD;
+  const timeoutMs = Math.min(Math.max(parseInt(input.timeoutMs || TERMINAL_TIMEOUT_MS, 10) || TERMINAL_TIMEOUT_MS, 1000), 600000);
+  const maxOutputChars = Math.min(Math.max(parseInt(input.maxOutputChars || TERMINAL_MAX_OUTPUT_CHARS, 10) || TERMINAL_MAX_OUTPUT_CHARS, 1000), 200000);
+  const startedAt = new Date().toISOString();
+  return new Promise((resolve) => {
+    const child = spawn('bash', ['-lc', cmd], {
+      cwd,
+      env: process.env,
+      shell: false,
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill('SIGTERM'); } catch {}
+      setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 1500).unref?.();
+    }, timeoutMs);
+    child.stdout.on('data', (buf) => {
+      const res = appendLimited(stdout, buf.toString('utf8'), maxOutputChars);
+      stdout = res.text;
+      stdoutTruncated = stdoutTruncated || res.truncated;
+    });
+    child.stderr.on('data', (buf) => {
+      const res = appendLimited(stderr, buf.toString('utf8'), maxOutputChars);
+      stderr = res.text;
+      stderrTruncated = stderrTruncated || res.truncated;
+    });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ ok: false, cmd, cwd, startedAt, finishedAt: new Date().toISOString(), error: err.message || String(err), stdout, stderr });
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      resolve({
+        ok: code === 0 && !timedOut,
+        cmd,
+        cwd,
+        exitCode: code,
+        signal,
+        timedOut,
+        timeoutMs,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        stdout,
+        stderr,
+        stdoutTruncated,
+        stderrTruncated,
+      });
+    });
+  });
+}
+
 // ── System prompt builder ────────────────────────────────────────
 
 function buildSystemPrompt(task) {
@@ -418,6 +824,8 @@ function buildSystemPrompt(task) {
 - 修改笔记前必须先读取（fns_get）。
 - 只有用户明确要求浏览列表时才使用 fns_list。
 - 涉及任务范式时使用 fns_folder 查询 "${TASKS_PREFIX}" 文件夹。
+- 遇到 CSV、XLSX 转出的 CSV、Markdown 表格、账单清单等结构化数据时，优先使用 data_profile / data_filter_sort / data_group / data_dedupe 做统计、筛选、汇总和去重，不要靠肉眼通读大表。
+- terminal_exec 是真实本机 shell，拥有当前服务用户的完整权限。只有在用户要求执行终端命令、运行测试/脚本、安装依赖、检查本地文件或系统状态时使用。不要把终端输出日志写进笔记，除非用户明确要求。
 - 完成后用中文简短说明你修改了哪条笔记、写入了什么。
 
 当前日期是 ${now.date}，当前时间是 ${now.time}，时区是 ${now.timeZone}。
@@ -469,6 +877,16 @@ async function executeToolCall(name, input) {
       return await fnsRequest('/api/note/replace', {
         method: 'POST', body: { vault, path: input.path, old: input.old || '', new: input.new || '' },
       });
+    case 'data_profile':
+      return dataProfile(input);
+    case 'data_filter_sort':
+      return dataFilterSort(input);
+    case 'data_group':
+      return dataGroup(input);
+    case 'data_dedupe':
+      return dataDedupe(input);
+    case 'terminal_exec':
+      return await runTerminalCommand(input);
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -488,6 +906,13 @@ function summarizeToolInput(input) {
   if (input.keyword) parts.push(`keyword=${input.keyword}`);
   if (input.prefix) parts.push(`prefix=${input.prefix}`);
   if (input.path) parts.push(`path=${input.path}`);
+  if (input.groupBy) parts.push(`groupBy=${Array.isArray(input.groupBy) ? input.groupBy.join(',') : input.groupBy}`);
+  if (input.sortBy) parts.push(`sortBy=${input.sortBy}`);
+  if (input.keyColumns) parts.push(`keyColumns=${Array.isArray(input.keyColumns) ? input.keyColumns.join(',') : input.keyColumns}`);
+  if (input.filters) parts.push(`filters=${Array.isArray(input.filters) ? input.filters.length : 1}`);
+  if (input.text) parts.push(`text=${String(input.text).length} chars`);
+  if (input.cmd) parts.push(`cmd=${String(input.cmd).slice(0, 100)}${String(input.cmd).length > 100 ? '...' : ''}`);
+  if (input.cwd) parts.push(`cwd=${input.cwd}`);
   if (input.old) parts.push(`old=${String(input.old).slice(0, 60)}`);
   if (input.new) parts.push(`new=${String(input.new).slice(0, 60)}`);
   if (input.content) parts.push(`content=${String(input.content).slice(0, 80)}${String(input.content).length > 80 ? '...' : ''}`);
