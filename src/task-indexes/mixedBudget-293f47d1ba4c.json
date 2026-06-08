@@ -1,0 +1,1710 @@
+{
+  "taskPath": "000 PARA/020 Areas/AI任务/mixedBudget.md",
+  "generatedAt": "2026-06-08T15:24:25.299Z",
+  "vault": "Life-Learing",
+  "noteCount": 448,
+  "truncated": false,
+  "manualDirectories": [],
+  "terms": [
+    "para",
+    "areas",
+    "ai任务",
+    "mixedbudget",
+    "md",
+    "你是",
+    "附件记账去重",
+    "助手",
+    "你的目标是",
+    "从用户上传的截图",
+    "excel",
+    "csv",
+    "或文本中提取消费记录",
+    "obsidian",
+    "中已有账单核对",
+    "只写入确认不是重复的新记录",
+    "账单位置与格式",
+    "账单根目录固定为",
+    "journals",
+    "reviews",
+    "bills",
+    "yyyy",
+    "m月",
+    "每日文件命名格式为",
+    "d日周x",
+    "例如",
+    "6月",
+    "8日周一",
+    "表格列固定为",
+    "日期",
+    "星期",
+    "类型",
+    "备注",
+    "金额",
+    "垫付",
+    "新增行格式固定为",
+    "yyyy-mm-dd",
+    "周x",
+    "数据处理工具流程",
+    "必须优先执行",
+    "遇到",
+    "微信",
+    "支付宝账单",
+    "markdown",
+    "表格或长文本账单时",
+    "不要靠肉眼通读大表",
+    "必须按下面顺序使用数据处理工具",
+    "先概览",
+    "使用",
+    "data_profile",
+    "查看列名",
+    "行数",
+    "样例",
+    "金额列统计和缺失值",
+    "如果是",
+    "xlsx",
+    "系统会先转为",
+    "文本处理",
+    "根据",
+    "profile"
+  ],
+  "hints": [
+    "900 Journals & Reviews/950 Bills/YYYY/M月/",
+    "900 Journals & Reviews/950 Bills/2026/6月/8日周一.md",
+    "900 Journals & Reviews/950 Bills/YYYY/M月/D日周X.md",
+    "000 PARA/020 Areas/AI任务/mixedBudget.md",
+    "900 Journals & Reviews/950 Bills/YYYY/M月",
+    "微信/支付宝账单",
+    "商户/备注列",
+    "状态失败/已关闭/退款成功的记录",
+    "日期/交易时间",
+    "用备注/商品说明/交易说明替代",
+    "除非用户或附件明确表示可报销/代付/垫付",
+    "并且备注中核心商户/商品名称高度相似",
+    "疑似重复/需确认",
+    "标题/表头/新增行"
+  ],
+  "directories": [
+    {
+      "path": "900 Journals & Reviews",
+      "count": 140,
+      "score": 1120
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes",
+      "count": 73,
+      "score": 584
+    },
+    {
+      "path": "000 PARA",
+      "count": 98,
+      "score": 392
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills",
+      "count": 30,
+      "score": 360
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026",
+      "count": 30,
+      "score": 360
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本",
+      "count": 42,
+      "score": 336
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档",
+      "count": 41,
+      "score": 328
+    },
+    {
+      "path": "900 Journals & Reviews/Calender",
+      "count": 33,
+      "score": 264
+    },
+    {
+      "path": "000 PARA/040 Archives",
+      "count": 65,
+      "score": 260
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月",
+      "count": 16,
+      "score": 224
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月",
+      "count": 13,
+      "score": 156
+    },
+    {
+      "path": "000 PARA/040 Archives/归档作业",
+      "count": 32,
+      "score": 128
+    },
+    {
+      "path": "000 PARA/020 Areas",
+      "count": 14,
+      "score": 112
+    },
+    {
+      "path": "000 PARA/040 Archives/归档演讲",
+      "count": 19,
+      "score": 76
+    },
+    {
+      "path": "000 PARA/020 Areas/AI任务",
+      "count": 6,
+      "score": 72
+    },
+    {
+      "path": "000 PARA/040 Archives/归档作业/iot106",
+      "count": 17,
+      "score": 68
+    },
+    {
+      "path": "000 PARA/040 Archives/归档项目",
+      "count": 10,
+      "score": 40
+    },
+    {
+      "path": "000 PARA/040 Archives/归档作业/iot106/assignment2",
+      "count": 10,
+      "score": 40
+    },
+    {
+      "path": "000 PARA/010 Projects",
+      "count": 9,
+      "score": 36
+    },
+    {
+      "path": "000 PARA/040 Archives/归档作业/iot105",
+      "count": 9,
+      "score": 36
+    },
+    {
+      "path": "000 PARA/020 Areas/快捷跳转",
+      "count": 4,
+      "score": 32
+    },
+    {
+      "path": "000 PARA/000 Inbox",
+      "count": 7,
+      "score": 28
+    },
+    {
+      "path": "000 PARA/040 Archives/归档作业/iot106/assignment1",
+      "count": 7,
+      "score": 28
+    },
+    {
+      "path": "000 PARA/040 Archives/归档演讲/entppt定量分析部分",
+      "count": 6,
+      "score": 24
+    },
+    {
+      "path": "000 PARA/040 Archives/归档作业/iot104",
+      "count": 6,
+      "score": 24
+    },
+    {
+      "path": "000 PARA/000 Inbox/SURF",
+      "count": 5,
+      "score": 20
+    },
+    {
+      "path": "000 PARA/040 Archives/归档演讲/未命名",
+      "count": 5,
+      "score": 20
+    },
+    {
+      "path": "000 PARA/020 Areas/健康生活",
+      "count": 2,
+      "score": 16
+    },
+    {
+      "path": "000 PARA/010 Projects/CS自学日记",
+      "count": 3,
+      "score": 12
+    },
+    {
+      "path": "000 PARA/010 Projects/uno智行",
+      "count": 3,
+      "score": 12
+    },
+    {
+      "path": "000 PARA/040 Archives/归档演讲/infPPT大二下",
+      "count": 3,
+      "score": 12
+    },
+    {
+      "path": "000 PARA/040 Archives/归档作业/iot105/105",
+      "count": 3,
+      "score": 12
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/5月",
+      "count": 1,
+      "score": 12
+    },
+    {
+      "path": "000 PARA/000 Inbox/ideas",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/010 Projects/送货机器人项目",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/010 Projects/送货机器人项目/SLAM系统",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/010 Projects/CS自学日记/stm32",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/010 Projects/CS自学日记/stm32/数模转换原理",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/030 Resources",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/040 Archives/归档事件",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/040 Archives/归档事件/工作规划",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/040 Archives/归档项目/机器人社团工程底盘",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/040 Archives/归档项目/面试 uno机器人",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/040 Archives/归档项目/租房",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/040 Archives/归档项目/ideas科研",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/040 Archives/归档演讲/infppt",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/040 Archives/归档作业/iot104/pre",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/040 Archives/归档作业/iot105/ppt文稿",
+      "count": 2,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/020 Areas/怎么学习",
+      "count": 1,
+      "score": 8
+    },
+    {
+      "path": "900 Journals & Reviews/920 Weekly Review",
+      "count": 1,
+      "score": 8
+    },
+    {
+      "path": "900 Journals & Reviews/930 Monthly Review",
+      "count": 1,
+      "score": 8
+    },
+    {
+      "path": "900 Journals & Reviews/940 Yearly Review",
+      "count": 1,
+      "score": 8
+    },
+    {
+      "path": "000 PARA/010 Projects/送货机器人项目/SLAM系统/30 Resources",
+      "count": 1,
+      "score": 4
+    },
+    {
+      "path": "000 PARA/010 Projects/CS自学日记/MIT-Missing-Semester",
+      "count": 1,
+      "score": 4
+    },
+    {
+      "path": "000 PARA/010 Projects/CS自学日记/MIT-Missing-Semester/Inbox",
+      "count": 1,
+      "score": 4
+    },
+    {
+      "path": "000 PARA/010 Projects/uno智行/学习目录",
+      "count": 1,
+      "score": 4
+    },
+    {
+      "path": "000 PARA/010 Projects/uno智行/学习目录/面试题",
+      "count": 1,
+      "score": 4
+    },
+    {
+      "path": "000 PARA/010 Projects/uno智行/准备面试",
+      "count": 1,
+      "score": 4
+    },
+    {
+      "path": "000 PARA/040 Archives/归档垃圾桶",
+      "count": 1,
+      "score": 4
+    },
+    {
+      "path": "000 PARA/040 Archives/归档项目/机器人社团工程底盘/工程地盘",
+      "count": 1,
+      "score": 4
+    },
+    {
+      "path": "000 PARA/040 Archives/归档项目/rubbishbin",
+      "count": 1,
+      "score": 4
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/excel",
+      "count": 1,
+      "score": 4
+    },
+    {
+      "path": "500 Science",
+      "count": 86,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学",
+      "count": 80,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数",
+      "count": 66,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools",
+      "count": 56,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识",
+      "count": 34,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity",
+      "count": 27,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模",
+      "count": 20,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图",
+      "count": 17,
+      "score": 0
+    },
+    {
+      "path": "100 Self & Mind",
+      "count": 16,
+      "score": 0
+    },
+    {
+      "path": "300 Social & Communication",
+      "count": 16,
+      "score": 0
+    },
+    {
+      "path": "300 Social & Communication/课上的政哲法",
+      "count": 15,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/3.13.4行列式",
+      "count": 15,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模/doneClass",
+      "count": 15,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/微积分",
+      "count": 13,
+      "score": 0
+    },
+    {
+      "path": "300 Social & Communication/课上的政哲法/毛概",
+      "count": 11,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模/doneClass/020",
+      "count": 11,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/5.3特征值",
+      "count": 10,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/5.4对角化",
+      "count": 10,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/python",
+      "count": 9,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/Whiteboard",
+      "count": 9,
+      "score": 0
+    },
+    {
+      "path": "300 Social & Communication/课上的政哲法/毛概/专题一",
+      "count": 7,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/杂七杂八的工作",
+      "count": 7,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/做作业",
+      "count": 7,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/做作业/iot",
+      "count": 7,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/做作业/iot/iot003",
+      "count": 7,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/Whiteboard/whiteboard-item-4",
+      "count": 7,
+      "score": 0
+    },
+    {
+      "path": "100 Self & Mind/有感",
+      "count": 6,
+      "score": 0
+    },
+    {
+      "path": "400 Language & Writing",
+      "count": 6,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/1.51.7方程组的解和线性相关",
+      "count": 6,
+      "score": 0
+    },
+    {
+      "path": "400 Language & Writing/英语",
+      "count": 5,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/微积分/求积分",
+      "count": 5,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/基本开发方法&插件",
+      "count": 5,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/1.1线性等式系统",
+      "count": 4,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模/doneClass/020/data&Result",
+      "count": 4,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模/doneClass/022",
+      "count": 4,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/算法&数据结构",
+      "count": 4,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/python/基本函数",
+      "count": 4,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/微积分/求极限",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/定义",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/空间",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/逆矩阵",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "500 Science/物理",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/基本开发方法&插件/git",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/arduino",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/Programming C",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/python/库",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/python/库/pandas",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/杂七杂八的工作/lif001",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/Whiteboard/whiteboard-item-4/lif001",
+      "count": 3,
+      "score": 0
+    },
+    {
+      "path": "100 Self & Mind/给JYT打工",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "100 Self & Mind/生涯规划",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "100 Self & Mind/团队管理",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "100 Self & Mind/自我提升",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "300 Social & Communication/课上的政哲法/毛概/专题二",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "300 Social & Communication/课上的政哲法/政治法律",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "400 Language & Writing/英语/单词",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/微积分/求导",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/1.31.4 向量方程矩阵方程",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/空间/行列空间",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/判断题",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "500 Science/物理/lab",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模/b站课程",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模/doneClass/022/project",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/电路",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/电路/课程设置",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/基本开发方法&插件/shell",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/计算机原理",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/计算机原理/ISA指令集架构",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/arduino/基本函数",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/Matlab",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/Matlab/库算法",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/Programming C/learing notes",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/Programming C++",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/Programming C++/c++",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/杂七杂八的工作/西浦入学",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/杂七杂八的工作/eap project",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/Whiteboard/whiteboard-item-4/eap project",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/Whiteboard/whiteboard-item-4/item-1",
+      "count": 2,
+      "score": 0
+    },
+    {
+      "path": "100 Self & Mind/00_Inbox",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "100 Self & Mind/自我提升/快捷键",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "200 Health",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "300 Social & Communication/课上的政哲法/012形势政策",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "300 Social & Communication/课上的政哲法/近代史",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "400 Language & Writing/英语/英语提示词",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "500 Science/计算机科学",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "500 Science/计算机科学/计算机速成课",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "500 Science/计算机科学/计算机速成课/Area",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/工程数学",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/空间/子空间",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "500 Science/数学/线性代数/秩",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "500 Science/物理/电路实验",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "500 Science/物联网",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "500 Science/物联网/IOT104TC物联网导论、",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/工具&资源",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模/检验",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模/美赛tips",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模/doneClass/022/考点",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/数学建模/doneClass/022/Statistic",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/基本开发方法&插件/shell/基本交互",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/计算机原理/ISA指令集架构/Resource",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/算法&数据结构/机器算法",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/算法&数据结构/加密算法",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/算法&数据结构/建模",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/算法&数据结构/Hello算法",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/算法&数据结构/Hello算法/复杂度的分析",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/协议",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/Matlab/库算法/算法库",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/Programming C/大二",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/python/操作指南",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "600 Technology & Tools/学习专业知识/python/算法的实现",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/模板",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/邮件留档",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/杂七杂八的工作/西浦入学/未命名",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/白板&思维导图/items",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/Whiteboard/whiteboard-item-2",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/Whiteboard/whiteboard-item-4/item-1/item-1",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "700 Art & Creativity/Whiteboard/whiteboard-item-5",
+      "count": 1,
+      "score": 0
+    },
+    {
+      "path": "800 Business & Finance",
+      "count": 1,
+      "score": 0
+    }
+  ],
+  "relevantNotes": [
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/8日周一.md",
+      "updatedAt": "2026-06-08 08:38:33",
+      "size": 278,
+      "score": 38
+    },
+    {
+      "path": "000 PARA/020 Areas/AI任务/mixedBudget.md",
+      "updatedAt": "2026-06-08 14:05:54",
+      "size": 0,
+      "score": 36
+    },
+    {
+      "path": "000 PARA/020 Areas/快捷跳转/使用obsidian的快捷键.md",
+      "updatedAt": "2026-03-25 03:13:42",
+      "size": 0,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/1日周二.md",
+      "updatedAt": "2026-06-08 09:45:32",
+      "size": 374,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/1日周一.md",
+      "updatedAt": "2026-06-08 09:15:13",
+      "size": 341,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/2日周二.md",
+      "updatedAt": "2026-06-08 09:15:13",
+      "size": 281,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/2日周三.md",
+      "updatedAt": "2026-06-08 09:45:32",
+      "size": 375,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/3日周三.md",
+      "updatedAt": "2026-06-08 09:15:13",
+      "size": 625,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/3日周四.md",
+      "updatedAt": "2026-06-08 09:45:32",
+      "size": 639,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/4日周四.md",
+      "updatedAt": "2026-06-08 09:15:13",
+      "size": 327,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/4日周五.md",
+      "updatedAt": "2026-06-08 09:45:32",
+      "size": 509,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/5日周六.md",
+      "updatedAt": "2026-06-08 09:45:32",
+      "size": 576,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/5日周五.md",
+      "updatedAt": "2026-06-08 09:45:52",
+      "size": 0,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/6日周六.md",
+      "updatedAt": "2026-06-08 08:52:18",
+      "size": 969,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/6日周日.md",
+      "updatedAt": "2026-06-08 09:45:32",
+      "size": 1200,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/7日周日.md",
+      "updatedAt": "2026-06-08 09:45:52",
+      "size": 0,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/7日周一.md",
+      "updatedAt": "2026-06-08 09:45:32",
+      "size": 1171,
+      "score": 16
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/6月/8日周二.md",
+      "updatedAt": "2026-06-08 09:45:32",
+      "size": 252,
+      "score": 16
+    },
+    {
+      "path": "000 PARA/020 Areas/AI任务/arrangement.md",
+      "updatedAt": "2026-06-08 14:06:22",
+      "size": 0,
+      "score": 14
+    },
+    {
+      "path": "000 PARA/020 Areas/AI任务/default.md",
+      "updatedAt": "2026-06-08 14:06:29",
+      "size": 0,
+      "score": 14
+    },
+    {
+      "path": "000 PARA/020 Areas/AI任务/Goodideas.md",
+      "updatedAt": "2026-06-08 14:05:34",
+      "size": 0,
+      "score": 14
+    },
+    {
+      "path": "000 PARA/020 Areas/AI任务/QuickBudge.md",
+      "updatedAt": "2026-06-08 14:06:05",
+      "size": 0,
+      "score": 14
+    },
+    {
+      "path": "000 PARA/020 Areas/AI任务/todoList.md",
+      "updatedAt": "2026-06-08 14:05:21",
+      "size": 0,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/10日周六.md",
+      "updatedAt": "2026-06-08 06:04:07",
+      "size": 312,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/11日周日.md",
+      "updatedAt": "2026-06-08 06:04:07",
+      "size": 274,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/12日周一.md",
+      "updatedAt": "2026-06-08 06:04:07",
+      "size": 257,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/13日周二.md",
+      "updatedAt": "2026-06-08 06:04:07",
+      "size": 377,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/1日周四.md",
+      "updatedAt": "2026-06-08 06:03:34",
+      "size": 312,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/2日周五.md",
+      "updatedAt": "2026-06-08 06:03:35",
+      "size": 516,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/3日周六.md",
+      "updatedAt": "2026-06-08 06:03:35",
+      "size": 398,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/4日周日.md",
+      "updatedAt": "2026-06-08 06:03:50",
+      "size": 417,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/5日周一.md",
+      "updatedAt": "2026-06-08 06:03:50",
+      "size": 331,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/6日周二.md",
+      "updatedAt": "2026-06-08 06:03:51",
+      "size": 343,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/7日周三.md",
+      "updatedAt": "2026-06-08 06:03:51",
+      "size": 491,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/8日周四.md",
+      "updatedAt": "2026-06-08 06:04:07",
+      "size": 363,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/1月/9日周五.md",
+      "updatedAt": "2026-06-08 06:04:07",
+      "size": 322,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/950 Bills/2026/5月/31日周日.md",
+      "updatedAt": "2026-06-06 14:13:33",
+      "size": 203,
+      "score": 14
+    },
+    {
+      "path": "900 Journals & Reviews/Calender/2026-06-06 垫付学校垃圾桶设备.md",
+      "updatedAt": "2026-06-07 03:05:05",
+      "size": 163,
+      "score": 12
+    },
+    {
+      "path": "000 PARA/020 Areas/健康生活/减肥.md",
+      "updatedAt": "2026-03-04 07:16:42",
+      "size": 199,
+      "score": 10
+    },
+    {
+      "path": "000 PARA/020 Areas/健康生活/每日记录.md",
+      "updatedAt": "2026-03-09 10:04:21",
+      "size": 56,
+      "score": 10
+    },
+    {
+      "path": "000 PARA/020 Areas/快捷跳转/服务器 1 1.md",
+      "updatedAt": "2026-06-07 13:17:23",
+      "size": 41,
+      "score": 10
+    },
+    {
+      "path": "000 PARA/020 Areas/快捷跳转/服务器 1.md",
+      "updatedAt": "2026-06-07 13:17:20",
+      "size": 41,
+      "score": 10
+    },
+    {
+      "path": "000 PARA/020 Areas/快捷跳转/服务器.md",
+      "updatedAt": "2026-06-05 14:54:24",
+      "size": 41,
+      "score": 10
+    },
+    {
+      "path": "000 PARA/020 Areas/怎么学习/学习提示词.md",
+      "updatedAt": "2026-03-25 03:12:38",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "000 PARA/020 Areas/README.md",
+      "updatedAt": "2026-03-03 01:42:35",
+      "size": 668,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2025-11-18.md",
+      "updatedAt": "2026-03-12 05:39:12",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2025-11-24.md",
+      "updatedAt": "2026-05-04 16:10:56",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2025-11-24归档.md",
+      "updatedAt": "2026-03-03 01:42:35",
+      "size": 1394,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2025-11-25.md",
+      "updatedAt": "2026-05-04 16:10:56",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2025-11-26.md",
+      "updatedAt": "2026-03-03 01:42:35",
+      "size": 1,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2025-12-02.md",
+      "updatedAt": "2026-03-03 01:42:35",
+      "size": 1015,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2025-12-03.md",
+      "updatedAt": "2026-03-03 01:42:35",
+      "size": 50,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-03-03.md",
+      "updatedAt": "2026-03-03 02:40:46",
+      "size": 65,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-03-04.md",
+      "updatedAt": "2026-03-04 06:47:41",
+      "size": 104,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-03-05.md",
+      "updatedAt": "2026-03-05 01:10:12",
+      "size": 46,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-03-09.md",
+      "updatedAt": "2026-03-09 10:04:11",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-03-30.md",
+      "updatedAt": "2026-03-30 03:39:11",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-04-01.md",
+      "updatedAt": "2026-04-02 00:54:59",
+      "size": 113,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-05-02.md",
+      "updatedAt": "2026-05-04 14:10:04",
+      "size": 67,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-05-05.md",
+      "updatedAt": "2026-05-05 09:58:34",
+      "size": 167,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-05-08.md",
+      "updatedAt": "2026-05-08 09:52:36",
+      "size": 57,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-05-12.md",
+      "updatedAt": "2026-05-12 08:23:39",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-05-13.md",
+      "updatedAt": "2026-05-13 15:32:45",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-05-16.md",
+      "updatedAt": "2026-05-15 16:13:32",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-05-27.md",
+      "updatedAt": "2026-05-27 16:00:36",
+      "size": 73,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-05-28.md",
+      "updatedAt": "2026-05-28 11:03:25",
+      "size": 327,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-05-29.md",
+      "updatedAt": "2026-05-29 08:01:18",
+      "size": 253,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-05-30.md",
+      "updatedAt": "2026-05-29 15:42:29",
+      "size": 44,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-06-03.md",
+      "updatedAt": "2026-06-03 09:12:13",
+      "size": 225,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-06-06.md",
+      "updatedAt": "2026-06-06 14:22:11",
+      "size": 27,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-06-07.md",
+      "updatedAt": "2026-06-06 14:20:32",
+      "size": 24,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-06-08.md",
+      "updatedAt": "2026-06-08 14:12:38",
+      "size": 59,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/2026-06-09.md",
+      "updatedAt": "2026-06-08 13:57:08",
+      "size": 40,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/2026-05-27.md",
+      "updatedAt": "2026-05-27 15:05:43",
+      "size": 100,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-12-13.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-12-14.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-12-15.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-12-16.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-12-17.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-12-21.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-12-22.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-12-25.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-12-26.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-12-28.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2024-W50.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-01-04.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-02-17.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-02-26.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-02-28.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-03-04.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-03-06.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-03-11.md",
+      "updatedAt": "2026-05-27 14:59:09",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-03-12.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-03-17.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-03-18.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-03-19.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-03-20.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-03-23.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-03-26.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-04-02.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-04-23.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-04-24.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-05-05.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-05-11.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-05-20.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-05-21.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-06-26.md",
+      "updatedAt": "2026-05-27 14:59:11",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-07-05.md",
+      "updatedAt": "2026-05-27 14:59:11",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-07-07.md",
+      "updatedAt": "2026-05-27 14:59:10",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-07-12.md",
+      "updatedAt": "2026-05-27 14:59:11",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-10-07.md",
+      "updatedAt": "2026-05-27 14:59:11",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-10-24.md",
+      "updatedAt": "2026-05-27 14:59:11",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-11-06.md",
+      "updatedAt": "2026-05-27 14:59:11",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/2025-11-09.md",
+      "updatedAt": "2026-05-27 14:59:11",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/日记本/日记归档/presentation.md",
+      "updatedAt": "2026-05-27 14:59:11",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/未命名 1.md",
+      "updatedAt": "2026-06-06 14:23:26",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/未命名.md",
+      "updatedAt": "2026-05-29 14:27:31",
+      "size": 0,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/910 Daily Notes/README.md",
+      "updatedAt": "2026-03-03 01:42:34",
+      "size": 528,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/920 Weekly Review/README.md",
+      "updatedAt": "2026-03-03 01:42:34",
+      "size": 396,
+      "score": 10
+    },
+    {
+      "path": "900 Journals & Reviews/930 Monthly Review/README.md",
+      "updatedAt": "2026-03-03 01:42:35",
+      "size": 468,
+      "score": 10
+    }
+  ]
+}

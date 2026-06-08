@@ -15,6 +15,8 @@ const FNS_BASE_URL = (process.env.FNS_BASE_URL || 'http://127.0.0.1:9000').repla
 const FNS_TOKEN = process.env.FNS_TOKEN || '';
 const DEFAULT_VAULT = process.env.FNS_DEFAULT_VAULT || 'Life-Learing';
 const TASKS_PREFIX = process.env.FNS_TASKS_PREFIX || '000 PARA/020 Areas/AI任务/';
+const INBOX_PATH = process.env.FNS_INBOX_PATH || '000 PARA/000 Inbox.md';
+const INBOX_PREFIX = process.env.FNS_INBOX_PREFIX || '000 PARA/000 Inbox/ideas/';
 const APP_TIME_ZONE = process.env.APP_TIME_ZONE || 'Asia/Shanghai';
 process.env.TZ = process.env.TZ || APP_TIME_ZONE;
 
@@ -27,15 +29,24 @@ const CLAUDE_MODELS = (process.env.ANTHROPIC_MODELS || DEFAULT_CLAUDE_MODEL)
   .filter(Boolean);
 const CLAUDE_TIMEOUT_MS = parseInt(process.env.CLAUDE_TIMEOUT_MS || '180000', 10);
 const MAX_TOOL_ROUNDS = parseInt(process.env.CLAUDE_MAX_TOOL_ROUNDS || '100', 10);
+const FAST_MAX_TOKENS = parseInt(process.env.CLAUDE_FAST_MAX_TOKENS || '2048', 10);
 const JOB_HISTORY_LIMIT = parseInt(process.env.JOB_HISTORY_LIMIT || '20', 10);
 const JOB_LOG_PATH = process.env.JOB_LOG_PATH || path.join(__dirname, 'job-events.log');
 const JOB_LOG_MAX_BYTES = parseInt(process.env.JOB_LOG_MAX_BYTES || '5242880', 10);
+const REPO_GRAPH_ROOT = process.env.REPO_GRAPH_ROOT || path.resolve(__dirname, '..');
+const REPO_GRAPH_PATH = process.env.REPO_GRAPH_PATH || path.join(__dirname, 'repo-knowledge-graph.json');
+const REPO_GRAPH_MAX_FILES = parseInt(process.env.REPO_GRAPH_MAX_FILES || '1200', 10);
+const TASK_INDEX_DIR = process.env.TASK_INDEX_DIR || path.join(__dirname, 'task-indexes');
+const TASK_INDEX_BINDINGS_PATH = process.env.TASK_INDEX_BINDINGS_PATH || path.join(__dirname, 'task-index-bindings.json');
+const TASK_INDEX_MAX_NOTES = parseInt(process.env.TASK_INDEX_MAX_NOTES || '2500', 10);
+const TASK_INDEX_MAX_TEXT = parseInt(process.env.TASK_INDEX_MAX_TEXT || '12000', 10);
 const DATA_TOOL_MAX_CHARS = parseInt(process.env.DATA_TOOL_MAX_CHARS || '1000000', 10);
 const DATA_TOOL_MAX_ROWS = parseInt(process.env.DATA_TOOL_MAX_ROWS || '20000', 10);
 const TERMINAL_TOOL_ENABLED = process.env.TERMINAL_TOOL_ENABLED !== '0';
 const TERMINAL_DEFAULT_CWD = process.env.TERMINAL_DEFAULT_CWD || path.resolve(__dirname, '..');
 const TERMINAL_TIMEOUT_MS = parseInt(process.env.TERMINAL_TIMEOUT_MS || '120000', 10);
 const TERMINAL_MAX_OUTPUT_CHARS = parseInt(process.env.TERMINAL_MAX_OUTPUT_CHARS || '60000', 10);
+const TERMINAL_DEFAULT_AS_ROOT = process.env.TERMINAL_DEFAULT_AS_ROOT !== '0';
 
 // ── Auth config ──────────────────────────────────────────────────
 const PASSWORD_HASH = process.env.WEB_ACCESS_PASSWORD_HASH || '';
@@ -306,6 +317,18 @@ const FNS_TOOLS = [
     },
   },
   {
+    name: 'repo_graph_search',
+    description: '查询本地开源仓库知识图谱，快速定位文件、函数、类、依赖和相关代码片段。适合回答代码结构、调用链、已有实现位置，避免把整仓库塞进上下文。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '要查找的功能、文件、符号或关键词' },
+        limit: { type: 'integer', description: '最多返回结果数，默认 8，最大 20' },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'terminal_exec',
     description: '执行本机真实终端命令，拥有运行当前 Node 服务用户的完整 shell 权限。用于用户明确要求执行命令、读写本地文件、运行测试、安装依赖、启动脚本或检查系统状态时。此工具会执行 bash -lc，不做命令沙箱。',
     input_schema: {
@@ -313,6 +336,7 @@ const FNS_TOOLS = [
       properties: {
         cmd: { type: 'string', description: '要执行的 shell 命令，会通过 bash -lc 执行' },
         cwd: { type: 'string', description: `工作目录，默认 ${TERMINAL_DEFAULT_CWD}` },
+        asRoot: { type: 'boolean', description: `是否用 sudo -n 以 root 执行，默认 ${TERMINAL_DEFAULT_AS_ROOT}` },
         timeoutMs: { type: 'integer', description: `超时时间毫秒，默认 ${TERMINAL_TIMEOUT_MS}，最大 600000` },
         maxOutputChars: { type: 'integer', description: `最多返回 stdout/stderr 字符数，默认 ${TERMINAL_MAX_OUTPUT_CHARS}` },
       },
@@ -415,6 +439,54 @@ function unwrap(data) {
   return data && typeof data === 'object' && 'data' in data ? data.data : data;
 }
 
+async function fnsNoteGet(pathOrId, vault = DEFAULT_VAULT) {
+  const candidates = [
+    ['/api/note', { path: pathOrId, vault }],
+    [`/api/notes/${encodeURIComponent(pathOrId)}`, { vault }],
+    ['/api/notes/content', { path: pathOrId, vault }],
+  ];
+  let lastErr = null;
+  for (const [apiPath, params] of candidates) {
+    try {
+      return await fnsRequest(apiPath, { params });
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('note_get failed');
+}
+
+async function fnsNoteSave(pathOrId, content, vault = DEFAULT_VAULT) {
+  const candidates = ['/api/note', '/api/notes'];
+  let lastErr = null;
+  for (const apiPath of candidates) {
+    try {
+      return await fnsRequest(apiPath, { method: 'POST', body: { vault, path: pathOrId, content: content || '' } });
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('note_save failed');
+}
+
+async function fnsNoteDelete(pathOrId, vault = DEFAULT_VAULT) {
+  const candidates = [
+    ['DELETE', '/api/note', { vault, path: pathOrId }, null],
+    ['DELETE', `/api/notes/${encodeURIComponent(pathOrId)}`, { vault }, null],
+    ['POST', '/api/note/delete', null, { vault, path: pathOrId }],
+    ['POST', '/api/notes/delete', null, { vault, path: pathOrId }],
+  ];
+  let lastErr = null;
+  for (const [method, apiPath, params, body] of candidates) {
+    try {
+      return await fnsRequest(apiPath, { method, params, body });
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('note_delete failed');
+}
+
 function appNow() {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: APP_TIME_ZONE,
@@ -468,6 +540,316 @@ function parseFrontmatter(content) {
     data[m[1]] = value;
   }
   return data;
+}
+
+function shouldSkipRepoPath(name) {
+  return [
+    '.git', 'node_modules', '__pycache__', '.venv', 'venv', 'dist', 'build', 'coverage',
+    '.next', '.cache', 'package-lock.json', 'web.log', 'job-events.log', 'repo-knowledge-graph.json',
+  ].includes(name);
+}
+
+function isGraphSourceFile(file) {
+  return /\.(js|jsx|ts|tsx|py|sh|md|json|html|css|yml|yaml)$/i.test(file);
+}
+
+function walkRepoFiles(dir, root, out) {
+  if (out.length >= REPO_GRAPH_MAX_FILES) return;
+  let entries = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    if (out.length >= REPO_GRAPH_MAX_FILES) break;
+    if (shouldSkipRepoPath(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walkRepoFiles(full, root, out);
+    else if (entry.isFile() && isGraphSourceFile(entry.name)) out.push(path.relative(root, full));
+  }
+}
+
+function extractRepoGraphNode(root, relPath) {
+  const full = path.join(root, relPath);
+  let text = '';
+  try { text = fs.readFileSync(full, 'utf8'); } catch { return null; }
+  if (text.length > 250000) text = text.slice(0, 250000);
+  const lines = text.split('\n');
+  const symbols = [];
+  const imports = [];
+  const addMatches = (regex, target, limit = 80) => {
+    let m;
+    while ((m = regex.exec(text)) && target.length < limit) target.push(m[1] || m[2] || m[0]);
+  };
+  addMatches(/^\s*(?:async\s+)?function\s+([A-Za-z0-9_$]+)/gm, symbols);
+  addMatches(/^\s*class\s+([A-Za-z0-9_$]+)/gm, symbols);
+  addMatches(/^\s*(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=/gm, symbols);
+  addMatches(/^\s*(?:async\s+)?def\s+([A-Za-z0-9_]+)/gm, symbols);
+  addMatches(/^\s*class\s+([A-Za-z0-9_]+)/gm, symbols);
+  addMatches(/^\s*(?:import\s+.+?\s+from\s+['"]([^'"]+)['"]|import\s+['"]([^'"]+)['"])/gm, imports, 60);
+  addMatches(/require\(['"]([^'"]+)['"]\)/g, imports, 60);
+  addMatches(/^\s*from\s+([A-Za-z0-9_./-]+)\s+import\s+/gm, imports, 60);
+  const summary = lines
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('//') && !line.startsWith('#!'))
+    .slice(0, 6)
+    .join(' ')
+    .slice(0, 600);
+  const keywords = Array.from(new Set((text.match(/[A-Za-z0-9_$\-\u4e00-\u9fa5]{3,}/g) || [])
+    .map((word) => word.toLowerCase())
+    .filter((word) => !/^\d+$/.test(word))))
+    .slice(0, 1000);
+  return {
+    path: relPath,
+    ext: path.extname(relPath).slice(1),
+    lines: lines.length,
+    symbols: Array.from(new Set(symbols)).slice(0, 80),
+    imports: Array.from(new Set(imports)).slice(0, 60),
+    keywords,
+    summary,
+  };
+}
+
+function buildRepoGraph() {
+  const files = [];
+  walkRepoFiles(REPO_GRAPH_ROOT, REPO_GRAPH_ROOT, files);
+  const nodes = files.map((file) => extractRepoGraphNode(REPO_GRAPH_ROOT, file)).filter(Boolean);
+  const graph = {
+    root: REPO_GRAPH_ROOT,
+    generatedAt: new Date().toISOString(),
+    fileCount: nodes.length,
+    nodes,
+  };
+  try { fs.writeFileSync(REPO_GRAPH_PATH, JSON.stringify(graph, null, 2)); } catch {}
+  return graph;
+}
+
+function loadRepoGraph() {
+  try {
+    const stat = fs.statSync(REPO_GRAPH_PATH);
+    if (Date.now() - stat.mtimeMs < 30 * 60 * 1000) {
+      const graph = JSON.parse(fs.readFileSync(REPO_GRAPH_PATH, 'utf8'));
+      if (graph && Array.isArray(graph.nodes)) return graph;
+    }
+  } catch {}
+  return buildRepoGraph();
+}
+
+function repoGraphSearch(input = {}) {
+  const query = String(input.query || '').trim();
+  if (!query) throw new Error('repo_graph_search query is required');
+  const limit = Math.min(Math.max(parseInt(input.limit || '8', 10) || 8, 1), 20);
+  const terms = query.toLowerCase().split(/[^a-z0-9_\-\u4e00-\u9fa5]+/i).filter(Boolean);
+  const graph = loadRepoGraph();
+  const scored = graph.nodes.map((node) => {
+    const haystack = [
+      node.path,
+      node.ext,
+      ...(node.symbols || []),
+      ...(node.imports || []),
+      ...(node.keywords || []),
+      node.summary || '',
+    ].join(' ').toLowerCase();
+    let score = 0;
+    for (const term of terms) {
+      if (node.path.toLowerCase().includes(term)) score += 8;
+      if ((node.symbols || []).some((s) => s.toLowerCase().includes(term))) score += 10;
+      if ((node.imports || []).some((s) => s.toLowerCase().includes(term))) score += 5;
+      if ((node.keywords || []).includes(term)) score += 4;
+      if (haystack.includes(term)) score += 2;
+    }
+    return { node, score };
+  }).filter((item) => item.score > 0);
+  scored.sort((a, b) => b.score - a.score || a.node.path.localeCompare(b.node.path));
+  return {
+    query,
+    root: graph.root,
+    generatedAt: graph.generatedAt,
+    fileCount: graph.fileCount,
+    results: scored.slice(0, limit).map(({ node, score }) => ({
+      score,
+      path: node.path,
+      lines: node.lines,
+      symbols: (node.symbols || []).slice(0, 20),
+      imports: (node.imports || []).slice(0, 12),
+      summary: node.summary,
+    })),
+  };
+}
+
+function taskIndexPath(taskPath) {
+  const hash = crypto.createHash('sha1').update(String(taskPath || '')).digest('hex').slice(0, 12);
+  const name = String(taskPath || 'default')
+    .split('/')
+    .pop()
+    .replace(/\.md$/i, '')
+    .replace(/[\\/:*?"<>|#\[\]\s]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'task';
+  return path.join(TASK_INDEX_DIR, `${name}-${hash}.json`);
+}
+
+function loadTaskIndexBindings() {
+  try {
+    const data = JSON.parse(fs.readFileSync(TASK_INDEX_BINDINGS_PATH, 'utf8'));
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveTaskIndexBindings(bindings) {
+  fs.writeFileSync(TASK_INDEX_BINDINGS_PATH, JSON.stringify(bindings || {}, null, 2));
+}
+
+function normalizeBoundDirs(dirs) {
+  if (!Array.isArray(dirs)) return [];
+  return Array.from(new Set(dirs
+    .map((item) => String(item || '').trim().replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean)))
+    .slice(0, 40);
+}
+
+function boundDirsForTask(taskPath) {
+  const bindings = loadTaskIndexBindings();
+  return normalizeBoundDirs(bindings[taskPath] || []);
+}
+
+function tokenTerms(text) {
+  return Array.from(new Set((String(text || '').toLowerCase().match(/[a-z0-9_\-\u4e00-\u9fa5]{2,}/g) || [])
+    .filter((term) => !/^\d+$/.test(term) && !['http', 'https', 'api', 'true', 'false', 'null'].includes(term))))
+    .slice(0, 120);
+}
+
+function extractPathHints(task) {
+  const text = `${task?.path || ''}\n${task?.content || ''}`;
+  const hints = [];
+  const quoted = text.match(/["'`]([^"'`\n]+\/[^"'`\n]+)["'`]/g) || [];
+  for (const item of quoted) hints.push(item.replace(/^["'`]|["'`]$/g, ''));
+  const loose = text.match(/[0-9A-Za-z\u4e00-\u9fa5][0-9A-Za-z\u4e00-\u9fa5 _&.-]*(?:\/[0-9A-Za-z\u4e00-\u9fa5][0-9A-Za-z\u4e00-\u9fa5 _&.-]*)+/g) || [];
+  for (const item of loose) hints.push(item.trim());
+  return Array.from(new Set(hints)).slice(0, 80);
+}
+
+function notePathScore(notePath, terms, hints) {
+  const lower = String(notePath || '').toLowerCase();
+  let score = 0;
+  for (const hint of hints) {
+    const h = String(hint || '').toLowerCase();
+    if (h && lower.includes(h)) score += 18;
+  }
+  for (const term of terms) {
+    if (lower.includes(term)) score += term.length >= 4 ? 4 : 2;
+  }
+  return score;
+}
+
+function noteInBoundDir(notePath, dir) {
+  const clean = String(dir || '').replace(/^\/+|\/+$/g, '');
+  if (!clean) return false;
+  return String(notePath || '') === clean || String(notePath || '').startsWith(clean + '/');
+}
+
+function noteManualScore(notePath, manualDirectories) {
+  let score = 0;
+  for (const dir of manualDirectories || []) {
+    if (noteInBoundDir(notePath, dir)) score += 1000 + Math.min(String(dir).length, 200);
+  }
+  return score;
+}
+
+async function listVaultNotePaths(limit = TASK_INDEX_MAX_NOTES) {
+  const out = [];
+  const seen = new Set();
+  let page = 1;
+  while (page <= 200 && out.length < limit) {
+    const data = unwrap(await fnsRequest('/api/notes', { params: { vault: DEFAULT_VAULT, page, searchContent: false } }));
+    const list = Array.isArray(data) ? data : (data?.list || []);
+    for (const note of list) {
+      const p = String(note.path || '');
+      if (p && !seen.has(p)) {
+        seen.add(p);
+        out.push({ path: p, updatedAt: note.updatedAt || '', size: note.size || 0 });
+        if (out.length >= limit) break;
+      }
+    }
+    const pager = data?.pager || {};
+    const totalRows = Number(pager.totalRows || list.length || 0);
+    const pageSize = Number(pager.pageSize || list.length || 10);
+    if (!list.length || (totalRows && page * pageSize >= totalRows)) break;
+    page++;
+  }
+  return out;
+}
+
+async function buildTaskDirectoryIndex(task) {
+  if (!task?.path) return null;
+  fs.mkdirSync(TASK_INDEX_DIR, { recursive: true });
+  const notes = await listVaultNotePaths();
+  const terms = tokenTerms(`${task.path}\n${task.content || ''}`);
+  const hints = extractPathHints(task);
+  const manualDirectories = boundDirsForTask(task.path);
+  const directories = new Map();
+  for (const note of notes) {
+    const parts = note.path.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      const dir = parts.slice(0, i).join('/');
+      const item = directories.get(dir) || { path: dir, count: 0, score: 0 };
+      item.count++;
+      item.score += notePathScore(dir, terms, hints) + noteManualScore(dir, manualDirectories);
+      directories.set(dir, item);
+    }
+  }
+  const relevantNotes = notes
+    .map((note) => ({ ...note, score: noteManualScore(note.path, manualDirectories) + notePathScore(note.path, terms, hints) }))
+    .filter((note) => note.score > 0)
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path, 'zh-CN'))
+    .slice(0, 120);
+  const topDirectories = Array.from(directories.values())
+    .sort((a, b) => b.score - a.score || b.count - a.count || a.path.localeCompare(b.path, 'zh-CN'))
+    .slice(0, 220);
+  const index = {
+    taskPath: task.path,
+    generatedAt: new Date().toISOString(),
+    vault: DEFAULT_VAULT,
+    noteCount: notes.length,
+    truncated: notes.length >= TASK_INDEX_MAX_NOTES,
+    manualDirectories,
+    terms: terms.slice(0, 60),
+    hints,
+    directories: topDirectories,
+    relevantNotes,
+  };
+  fs.writeFileSync(taskIndexPath(task.path), JSON.stringify(index, null, 2));
+  return index;
+}
+
+async function ensureTaskDirectoryIndex(task, { force = false } = {}) {
+  if (!task?.path) return null;
+  const p = taskIndexPath(task.path);
+  if (!force) {
+    try {
+      const index = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (index && index.taskPath === task.path) return index;
+    } catch {}
+  }
+  return await buildTaskDirectoryIndex(task);
+}
+
+function taskDirectoryIndexText(index) {
+  if (!index) return '';
+  const compact = {
+    taskPath: index.taskPath,
+    generatedAt: index.generatedAt,
+    vault: index.vault,
+    noteCount: index.noteCount,
+    truncated: index.truncated,
+    manualDirectories: index.manualDirectories || [],
+    pathHints: (index.hints || []).slice(0, 20),
+    likelyDirectories: (index.directories || []).slice(0, 60).map((d) => ({ path: d.path, count: d.count })),
+    likelyNotes: (index.relevantNotes || []).slice(0, 50).map((n) => ({ path: n.path, updatedAt: n.updatedAt, size: n.size })),
+  };
+  let text = JSON.stringify(compact, null, 2);
+  if (text.length > TASK_INDEX_MAX_TEXT) text = text.slice(0, TASK_INDEX_MAX_TEXT) + '\n[任务目录索引已截断]';
+  return text;
 }
 
 function setJobProgress(job, stage, progressText, extra = {}) {
@@ -752,16 +1134,24 @@ function runTerminalCommand(input = {}) {
   const cmd = String(input.cmd || '').trim();
   if (!cmd) throw new Error('terminal_exec cmd is required');
   const cwd = input.cwd ? path.resolve(String(input.cwd)) : TERMINAL_DEFAULT_CWD;
+  const asRoot = Object.prototype.hasOwnProperty.call(input, 'asRoot') ? input.asRoot !== false : TERMINAL_DEFAULT_AS_ROOT;
   const timeoutMs = Math.min(Math.max(parseInt(input.timeoutMs || TERMINAL_TIMEOUT_MS, 10) || TERMINAL_TIMEOUT_MS, 1000), 600000);
   const maxOutputChars = Math.min(Math.max(parseInt(input.maxOutputChars || TERMINAL_MAX_OUTPUT_CHARS, 10) || TERMINAL_MAX_OUTPUT_CHARS, 1000), 200000);
   const startedAt = new Date().toISOString();
   return new Promise((resolve) => {
-    const child = spawn('bash', ['-lc', cmd], {
+    const child = asRoot
+      ? spawn('sudo', ['-n', 'bash', '-lc', cmd], {
+        cwd,
+        env: process.env,
+        shell: false,
+        windowsHide: true,
+      })
+      : spawn('bash', ['-lc', cmd], {
       cwd,
       env: process.env,
       shell: false,
       windowsHide: true,
-    });
+      });
     let stdout = '';
     let stderr = '';
     let stdoutTruncated = false;
@@ -784,7 +1174,7 @@ function runTerminalCommand(input = {}) {
     });
     child.on('error', (err) => {
       clearTimeout(timer);
-      resolve({ ok: false, cmd, cwd, startedAt, finishedAt: new Date().toISOString(), error: err.message || String(err), stdout, stderr });
+      resolve({ ok: false, cmd, cwd, asRoot, startedAt, finishedAt: new Date().toISOString(), error: err.message || String(err), stdout, stderr });
     });
     child.on('close', (code, signal) => {
       clearTimeout(timer);
@@ -792,6 +1182,7 @@ function runTerminalCommand(input = {}) {
         ok: code === 0 && !timedOut,
         cmd,
         cwd,
+        asRoot,
         exitCode: code,
         signal,
         timedOut,
@@ -809,11 +1200,17 @@ function runTerminalCommand(input = {}) {
 
 // ── System prompt builder ────────────────────────────────────────
 
-function buildSystemPrompt(task) {
+function buildSystemPrompt(task, fastMode = false, taskIndex = '') {
   const now = appNow();
   const taskBlock = task?.content
     ? `\n本次必须优先遵守以下任务范式，来自笔记：${task.path}\n\n${task.content}\n`
     : '\n本次未选择任务范式，按默认笔记助理原则执行。\n';
+  const fastBlock = fastMode
+    ? '\n当前启用快捷模式：优先点对点完成任务，减少解释和探索；只在确有必要时调用工具；回答要短，直接给结论或已完成的修改。\n'
+    : '';
+  const taskIndexBlock = taskIndex
+    ? `\n本任务已有目录索引。需要定位笔记时优先使用这些目录和候选路径，避免无目的搜索；只有索引明显不够时再用 fns_search。\n\n${taskIndex}\n`
+    : '';
 
   return `你是我的手机笔记助理。用户会用自然语言描述要记录、查询、整理或修改的内容。
 
@@ -825,11 +1222,14 @@ function buildSystemPrompt(task) {
 - 只有用户明确要求浏览列表时才使用 fns_list。
 - 涉及任务范式时使用 fns_folder 查询 "${TASKS_PREFIX}" 文件夹。
 - 遇到 CSV、XLSX 转出的 CSV、Markdown 表格、账单清单等结构化数据时，优先使用 data_profile / data_filter_sort / data_group / data_dedupe 做统计、筛选、汇总和去重，不要靠肉眼通读大表。
-- terminal_exec 是真实本机 shell，拥有当前服务用户的完整权限。只有在用户要求执行终端命令、运行测试/脚本、安装依赖、检查本地文件或系统状态时使用。不要把终端输出日志写进笔记，除非用户明确要求。
+- 涉及本地开源仓库、代码结构、调用链、已有实现位置时，优先使用 repo_graph_search 定位少量相关文件，再决定是否需要 terminal_exec 查看具体内容。
+- terminal_exec 是真实本机 shell。默认用 sudo -n 以 root 执行，拥有系统级读写/删除权限；如需普通用户权限可传 asRoot=false。只有在用户要求执行终端命令、运行测试/脚本、安装依赖、检查本地文件或系统状态时使用。不要把终端输出日志写进笔记，除非用户明确要求。
 - 完成后用中文简短说明你修改了哪条笔记、写入了什么。
 
 当前日期是 ${now.date}，当前时间是 ${now.time}，时区是 ${now.timeZone}。
 用户提到"明天"、"下周"等相对日期时，请按这个时区换算成明确日期写入笔记。
+${fastBlock}
+${taskIndexBlock}
 ${taskBlock}`;
 }
 
@@ -860,11 +1260,9 @@ async function executeToolCall(name, input) {
       return { ...result, data: { ...(result.data || {}), list: filtered, total: filtered.length } };
     }
     case 'fns_get':
-      return await fnsRequest('/api/note', { params: { vault, path: input.path } });
+      return await fnsNoteGet(input.path, vault);
     case 'fns_save':
-      return await fnsRequest('/api/note', {
-        method: 'POST', body: { vault, path: input.path, content: input.content || '' },
-      });
+      return await fnsNoteSave(input.path, input.content || '', vault);
     case 'fns_append':
       return await fnsRequest('/api/note/append', {
         method: 'POST', body: { vault, path: input.path, content: input.content || '' },
@@ -885,6 +1283,8 @@ async function executeToolCall(name, input) {
       return dataGroup(input);
     case 'data_dedupe':
       return dataDedupe(input);
+    case 'repo_graph_search':
+      return repoGraphSearch(input);
     case 'terminal_exec':
       return await runTerminalCommand(input);
     default:
@@ -1002,8 +1402,11 @@ async function runClaude(userText, task, model, jobRef, history, files) {
   if (!ANTHROPIC_AUTH_TOKEN) throw new Error('ANTHROPIC_AUTH_TOKEN is not set');
 
   const selectedModel = normalizeModel(model);
-  const systemPrompt = buildSystemPrompt(task);
+  if (task?.path) setJobProgress(jobRef, 'thinking', '检查任务目录索引');
+  const index = task?.path ? await ensureTaskDirectoryIndex(task) : null;
+  const systemPrompt = buildSystemPrompt(task, Boolean(jobRef?.fastMode), taskDirectoryIndexText(index));
   const userContent = buildUserContent(userText, files);
+  const maxTokens = jobRef?.fastMode ? FAST_MAX_TOKENS : 4096;
 
   const messages = [...sanitizeHistory(history), { role: 'user', content: userContent }];
   let reply = '';
@@ -1019,7 +1422,7 @@ async function runClaude(userText, task, model, jobRef, history, files) {
 
     const response = await withTimeout(anthropic.messages.create({
       model: selectedModel,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       system: systemPrompt,
       messages: messages,
       tools: FNS_TOOLS,
@@ -1096,9 +1499,12 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history, f
   if (!ANTHROPIC_AUTH_TOKEN) throw new Error('ANTHROPIC_AUTH_TOKEN is not set');
 
   const selectedModel = normalizeModel(model);
-  const systemPrompt = buildSystemPrompt(task);
+  if (task?.path) emitJobProgress(res, jobRef, 'thinking', '检查任务目录索引');
+  const index = task?.path ? await ensureTaskDirectoryIndex(task) : null;
+  const systemPrompt = buildSystemPrompt(task, Boolean(jobRef?.fastMode), taskDirectoryIndexText(index));
   const userContent = buildUserContent(userText, files);
   const messages = [...sanitizeHistory(history), { role: 'user', content: userContent }];
+  const maxTokens = jobRef?.fastMode ? FAST_MAX_TOKENS : 4096;
   let fullReply = '';
   let rounds = 0;
   let completed = false;
@@ -1112,7 +1518,7 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history, f
 
     const stream = await withTimeout(anthropic.messages.create({
       model: selectedModel,
-      max_tokens: 4096,
+      max_tokens: maxTokens,
       system: systemPrompt,
       messages,
       tools: FNS_TOOLS,
@@ -1165,7 +1571,7 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history, f
       emitJobProgress(res, jobRef, 'thinking', `第 ${rounds} 轮流式返回为空，改用非流式重试`, { round: rounds });
       const retryResponse = await withTimeout(anthropic.messages.create({
         model: selectedModel,
-        max_tokens: 4096,
+        max_tokens: maxTokens,
         system: systemPrompt,
         messages,
         tools: FNS_TOOLS,
@@ -1244,6 +1650,7 @@ function serializeJob(job) {
     status: job.status,
     message: job.message,
     model: job.model,
+    fastMode: Boolean(job.fastMode),
     taskPath: job.task?.path || '',
     reply: job.reply || '',
     partialReply: job.partialReply || '',
@@ -1264,7 +1671,7 @@ function trimJobs() {
   if (jobs.length > JOB_HISTORY_LIMIT) jobs.length = JOB_HISTORY_LIMIT;
 }
 
-function enqueueJob({ message, task, model, history, files }) {
+function enqueueJob({ message, task, model, history, files, fastMode }) {
   const now = appNow();
   const job = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1272,6 +1679,7 @@ function enqueueJob({ message, task, model, history, files }) {
     message,
     task,
     model: normalizeModel(model),
+    fastMode: Boolean(fastMode),
     history: history || [],
     files: files || [],
     createdAt: `${now.date} ${now.time}`,
@@ -1388,27 +1796,33 @@ const html = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Claude Notes</title>
   <style>
-    :root{--bg:#0c0f10;--panel:#151917;--panel-2:#101413;--line:#2a332f;--line-soft:#202824;--text:#f7f3ea;--muted:#a8b0a7;--accent:#d4a574;--accent-2:#64d2c1;--ok:#8fe5a7;--bad:#ff9187;--shadow:0 18px 60px rgba(0,0,0,.34)}
+    :root{--bg:#0c0f10;--panel:#151917;--panel-2:#101413;--line:#2a332f;--line-soft:#202824;--text:#f7f3ea;--muted:#a8b0a7;--accent:#d4a574;--accent-2:#64d2c1;--ok:#8fe5a7;--bad:#ff9187;--shadow:0 18px 60px rgba(0,0,0,.34);--app-bg:linear-gradient(180deg,#111815 0,#0c0f10 50%,#080a0a 100%);--surface-rgb:8,10,10;--chrome-alpha:.9;--bg-image-alpha:.7;--header-bg:rgba(var(--surface-rgb),var(--chrome-alpha));--bar-bg:rgba(var(--surface-rgb),var(--chrome-alpha))}
+    html[data-theme="light"]{--bg:#f6f4ee;--panel:#ffffff;--panel-2:#f7f6f1;--line:#d9d5ca;--line-soft:#e7e2d7;--text:#1d211e;--muted:#68736d;--accent:#9b6b3d;--accent-2:#187c70;--ok:#277a42;--bad:#b64037;--shadow:0 18px 50px rgba(60,48,32,.16);--app-bg:linear-gradient(180deg,#fbfaf6 0,#f2f0e8 100%);--surface-rgb:255,255,255}
+    html[data-theme="contrast"]{--bg:#070707;--panel:#101010;--panel-2:#151515;--line:#3f3f3f;--line-soft:#292929;--text:#ffffff;--muted:#b8b8b8;--accent:#ffd166;--accent-2:#4dd6c6;--ok:#78f0a2;--bad:#ff7b72;--shadow:0 18px 60px rgba(0,0,0,.55);--app-bg:#070707;--surface-rgb:5,5,5}
+    html[data-theme="forest"]{--bg:#07110d;--panel:#101b15;--panel-2:#0b1510;--line:#254035;--line-soft:#183028;--text:#f0f7ee;--muted:#9ab2a6;--accent:#c7a36a;--accent-2:#67d391;--ok:#8fe5a7;--bad:#ff8a80;--shadow:0 18px 60px rgba(0,0,0,.38);--app-bg:linear-gradient(180deg,#0c1d15 0,#07110d 52%,#050908 100%);--surface-rgb:7,17,13}
+    html[data-theme="ocean"]{--bg:#081116;--panel:#101b22;--panel-2:#0b151b;--line:#263d48;--line-soft:#1b2e38;--text:#eef8fb;--muted:#9db2bb;--accent:#d5a66e;--accent-2:#63c7f2;--ok:#83dda7;--bad:#ff8e8e;--shadow:0 18px 60px rgba(0,0,0,.36);--app-bg:linear-gradient(180deg,#0d2028 0,#081116 52%,#05090c 100%);--surface-rgb:8,17,22}
+    html[data-theme="rose"]{--bg:#160d12;--panel:#21161b;--panel-2:#190f14;--line:#473039;--line-soft:#32232a;--text:#fff4f6;--muted:#c2a6ad;--accent:#d8a15f;--accent-2:#ff8fb3;--ok:#8fe0a1;--bad:#ff817a;--shadow:0 18px 60px rgba(0,0,0,.36);--app-bg:linear-gradient(180deg,#24131b 0,#160d12 55%,#0e080b 100%);--surface-rgb:22,13,18}
+    html[data-theme="graphite"]{--bg:#0d0f12;--panel:#171b20;--panel-2:#11151a;--line:#303842;--line-soft:#242b33;--text:#f2f4f7;--muted:#a6afb9;--accent:#caa46f;--accent-2:#9bb7ff;--ok:#8bd99a;--bad:#ff8a80;--shadow:0 18px 60px rgba(0,0,0,.42);--app-bg:linear-gradient(180deg,#151a20 0,#0d0f12 55%,#08090b 100%);--surface-rgb:13,15,18}
     *{box-sizing:border-box}
     html,body{height:100%;max-width:100%;overflow-x:hidden}
-    body{width:100%;margin:0;color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;background:linear-gradient(180deg,#111815 0,#0c0f10 50%,#080a0a 100%)}
-    .app{width:100%;max-width:100vw;min-width:0;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;overflow:hidden}
+    body{width:100%;margin:0;color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;background:var(--app-bg)}
+    body::before{content:"";position:fixed;inset:0;background:var(--custom-bg,transparent);background-size:cover;background-position:center;background-repeat:no-repeat;opacity:var(--bg-image-alpha);pointer-events:none}
+    .app{position:relative;width:100%;max-width:100vw;min-width:0;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;overflow:hidden}
     ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(168,176,167,.2);border-radius:99px}::-webkit-scrollbar-thumb:hover{background:rgba(168,176,167,.35)}
     .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%) translateY(-10px);z-index:99;padding:10px 20px;border-radius:999px;background:rgba(16,20,19,.96);color:var(--ok);border:1px solid rgba(143,229,167,.25);font-size:13px;font-weight:650;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;backdrop-filter:blur(20px);box-shadow:0 4px 24px rgba(0,0,0,.4)}
     .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-    header{z-index:3;padding:8px max(14px,env(safe-area-inset-left)) 8px max(14px,env(safe-area-inset-right));border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:8px;background:rgba(12,15,16,.9);position:sticky;top:0;backdrop-filter:blur(16px);box-shadow:0 1px 8px rgba(0,0,0,.15)}
-    .brand{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
-    .mark{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 10px 30px rgba(218,165,32,.18);display:grid;place-items:center;color:#0b100e;font-weight:900;font-size:14px;flex-shrink:0}
-    h1{font-size:16px;margin:0;font-weight:780;letter-spacing:0;white-space:nowrap}
+    header{z-index:3;padding:5px max(12px,env(safe-area-inset-left)) 5px max(12px,env(safe-area-inset-right));border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:6px;background:var(--header-bg);position:sticky;top:0;backdrop-filter:blur(16px);box-shadow:0 1px 8px rgba(0,0,0,.15)}
+    .brand{display:flex;align-items:center;gap:6px;min-width:0;flex:1}
+    .mark{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 10px 30px rgba(218,165,32,.18);display:grid;place-items:center;color:#0b100e;font-weight:900;font-size:12px;flex-shrink:0}
+    h1{font-size:14px;margin:0;font-weight:780;letter-spacing:0;white-space:nowrap}
     .subtitle{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none}
     @media(min-width:400px){.subtitle{display:inline}}
-    .model-btn{height:32px;min-width:40px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.03);color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;padding:0 10px;white-space:nowrap}
+    .model-btn{height:28px;min-width:38px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.03);color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;padding:0 9px;white-space:nowrap}
     .model-btn:hover{border-color:var(--accent-2);color:var(--text)}
-    .trash-btn{height:28px;min-width:28px;border:0;background:transparent;color:var(--muted);font-size:14px;cursor:pointer;padding:0;border-radius:6px;display:flex;align-items:center;justify-content:center}
+    .trash-btn{height:24px;min-width:24px;border:0;background:transparent;color:var(--muted);font-size:13px;cursor:pointer;padding:0;border-radius:6px;display:flex;align-items:center;justify-content:center}
     .trash-btn:hover{color:var(--bad)}
-    .state{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:7px 10px;white-space:nowrap;background:rgba(255,255,255,.03);transition:all .3s;max-width:min(220px,34vw);overflow:hidden;text-overflow:ellipsis;flex-shrink:1}
-    .cancel-btn{display:none;height:30px;width:30px;min-width:30px;border:1px solid var(--bad);border-radius:50%;background:transparent;color:var(--bad);font-size:14px;cursor:pointer;padding:0;line-height:1}
-    .cancel-btn.visible{display:inline-flex;align-items:center;justify-content:center}
+    .state{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 8px;white-space:nowrap;background:rgba(255,255,255,.03);transition:all .3s;max-width:min(220px,34vw);overflow:hidden;text-overflow:ellipsis;flex-shrink:1}
+    .cancel-btn,.cancel-btn.visible{display:none!important}
     .state[data-status="running"]{color:var(--accent);border-color:rgba(212,165,116,.45);animation:pulse 1.6s ease-in-out infinite}
     .state[data-status="queued"]{color:var(--accent-2);border-color:rgba(218,165,32,.35)}
     .state[data-status="error"]{color:var(--bad);border-color:rgba(255,145,135,.4)}
@@ -1431,11 +1845,13 @@ const html = `<!doctype html>
     .thinking-dots span:nth-child(3){animation-delay:.4s}
     @keyframes thinkBounce{0%,60%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
     .msg.thinking{border-left-color:var(--accent-2);animation:pulse 1.5s ease-in-out infinite}
-    .progress-line{display:flex;align-items:center;gap:8px;margin-top:4px;color:var(--muted);font-size:13px;min-width:0}
-    .progress-line .progress-track{position:relative;flex:1;min-width:72px;height:3px;overflow:hidden;border-radius:999px;background:rgba(255,255,255,.08)}
+    .progress-line{display:flex;align-items:center;gap:8px;margin-top:4px;color:var(--muted);font-size:13px;min-width:0;max-width:100%;overflow:hidden}
+    .progress-line .progress-track{position:relative;flex:1 1 52px;min-width:36px;height:3px;overflow:hidden;border-radius:999px;background:rgba(255,255,255,.08)}
     .progress-line .progress-track::after{content:"";position:absolute;inset:0;width:42%;border-radius:999px;background:linear-gradient(90deg,transparent,var(--accent-2),transparent);animation:progressSweep 1.25s ease-in-out infinite}
     @keyframes progressSweep{0%{transform:translateX(-110%)}100%{transform:translateX(250%)}}
     .progress-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .inline-cancel{height:28px;min-width:72px;border:1px solid rgba(255,145,135,.45);background:rgba(255,145,135,.08);color:var(--bad);border-radius:999px;padding:0 10px;font-size:12px;font-weight:750;box-shadow:none;flex-shrink:0}
+    .inline-cancel:hover{filter:none;transform:none;box-shadow:none;border-color:rgba(255,145,135,.75)}
     .conv-item .status-dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0;margin-top:5px}
     .status-dot.running{background:var(--accent-2);animation:pulse 1.2s infinite;box-shadow:0 0 6px rgba(100,210,193,.5)}
     .status-dot.done{background:var(--ok);box-shadow:0 0 4px rgba(143,229,167,.3)}
@@ -1473,7 +1889,7 @@ const html = `<!doctype html>
     .typing-dots span:nth-child(3){animation-delay:.4s}
     @keyframes dotPulse{0%,60%{opacity:.2}30%{opacity:1}}
     .tool-note{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
-    form{width:100%;max-width:100vw;min-width:0;z-index:2;padding:10px max(12px,env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right));border-top:1px solid rgba(255,255,255,.04);background:rgba(8,10,10,.88);backdrop-filter:blur(24px) saturate(120%);box-shadow:0 -8px 32px rgba(0,0,0,.3);overflow-x:hidden}
+    form{width:100%;max-width:100vw;min-width:0;z-index:2;padding:10px max(12px,env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right));border-top:1px solid rgba(255,255,255,.04);background:var(--bar-bg);backdrop-filter:blur(24px) saturate(120%);box-shadow:0 -8px 32px rgba(0,0,0,.3);overflow-x:hidden}
     .bar{width:100%;max-width:880px;min-width:0;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
     textarea{width:100%;min-height:54px;max-height:160px;resize:none;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(17,22,21,.8);color:var(--text);padding:12px 14px;outline:none;font:inherit;line-height:1.45;transition:border-color .2s,box-shadow .2s;backdrop-filter:blur(4px)}
     .char-count{font-size:11px;color:var(--muted);text-align:right;grid-column:1 / -1;margin-top:2px}
@@ -1482,19 +1898,22 @@ const html = `<!doctype html>
     button:active{transform:translateY(0) scale(.97)}
     button:disabled{opacity:.4;transform:none;box-shadow:none;filter:none}
     button:disabled{opacity:.45}
-    .paradigm-row{width:100%;max-width:880px;min-width:0;margin:0 auto 4px;display:flex;gap:6px;align-items:center}
-    .paradigm-row select{width:auto;min-width:120px;max-width:45%;flex:0 1 auto;height:36px;font-size:14px;border-radius:999px;padding:0 12px}
+    .paradigm-row{width:100%;max-width:880px;min-width:0;margin:0 auto 4px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
+    .paradigm-row select{width:100%;min-width:0;max-width:none;height:36px;font-size:14px;border-radius:999px;padding:0 12px}
+    .input-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
     .chip{height:36px;min-width:0;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--muted);border-radius:999px;padding:0 12px;font-size:13px;white-space:nowrap;font-weight:650;cursor:pointer;transition:all .2s}
     .chip:hover{border-color:rgba(255,255,255,.15);color:var(--text)}
     .chip.on{color:var(--accent-2);border-color:rgba(100,210,193,.4);background:rgba(100,210,193,.12);box-shadow:0 0 12px rgba(100,210,193,.15);animation:chipOn .3s ease-out}
     @keyframes chipOn{0%{box-shadow:0 0 0 rgba(100,210,193,.4);background:rgba(100,210,193,.25)}100%{box-shadow:0 0 12px rgba(100,210,193,.15);background:rgba(100,210,193,.12)}}
     #singleTurnBtn.on{color:var(--accent);border-color:rgba(212,165,116,.5);background:rgba(212,165,116,.08)}
-    .slot{height:36px;min-width:36px;border:1px dashed var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:0 12px;font-size:13px;white-space:nowrap;font-weight:650;cursor:pointer;transition:all .2s}
+    .slot{height:auto;min-height:36px;min-width:0;width:100%;border:1px dashed var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:5px 8px;font-size:12px;line-height:1.15;white-space:normal;word-break:break-word;overflow-wrap:anywhere;font-weight:650;cursor:pointer;transition:all .2s;text-align:center}
     .slot:hover{border-color:rgba(255,255,255,.2);color:var(--text)}
     .slot.filled{border-style:solid;border-color:var(--line);background:rgba(255,255,255,.04)}
     .slot.active{border-color:rgba(100,210,193,.55);color:var(--accent-2);background:rgba(100,210,193,.1);box-shadow:0 0 12px rgba(100,210,193,.1)}
+    .row-spacer{display:none}
+    .quick-right{margin-left:0}
     /* bottom tab bar */
-    .bottom-bar{position:sticky;bottom:0;z-index:5;display:flex;border-top:1px solid rgba(255,255,255,.05);background:rgba(12,15,16,.96);backdrop-filter:blur(16px);padding:4px max(12px,env(safe-area-inset-left)) max(4px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right))}
+    .bottom-bar{position:sticky;bottom:0;z-index:5;display:flex;border-top:1px solid rgba(255,255,255,.05);background:var(--header-bg);backdrop-filter:blur(16px);padding:4px max(12px,env(safe-area-inset-left)) max(4px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right))}
     .bb-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;border:0;background:transparent;color:var(--muted);font-size:20px;cursor:pointer;transition:color .15s;-webkit-tap-highlight-color:transparent}
     .bb-tab span{font-size:10px;font-weight:650}
     .bb-tab.on{color:var(--accent-2)}
@@ -1519,7 +1938,60 @@ const html = `<!doctype html>
     .todo-text.done{text-decoration:line-through;color:var(--muted)}
     .todo-toolbar{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
     .todo-toolbar .chip{height:30px;font-size:12px;padding:0 10px}
-    .todo-day-chips{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
+    .slot-row{grid-column:1 / -1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));justify-content:stretch;gap:6px;margin-top:2px;min-width:0;width:100%}
+    .slot-row::-webkit-scrollbar{display:none}
+    .todo-rail-wrap{position:relative;margin:-2px 0 8px;padding-top:7px}
+    .todo-rail-arrow{position:absolute;left:50%;top:0;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid var(--accent-2);transform:translateX(-50%);filter:drop-shadow(0 0 5px rgba(100,210,193,.45));pointer-events:none;z-index:1}
+    .todo-day-chips{display:flex;align-items:stretch;justify-content:flex-start;gap:5px;margin:0;padding:0 calc(50% - 21px);height:48px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scroll-padding-inline:calc(50% - 21px);-webkit-overflow-scrolling:touch;scrollbar-width:none}
+    .todo-day-chips::-webkit-scrollbar{display:none}
+    .todo-date-pill,.todo-date-arrow{display:none}
+    .todo-day-arrow{display:none}
+    .todo-day-chip{height:42px;min-width:42px;width:42px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.025);color:var(--muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:2px 3px;font-size:10px;line-height:1;scroll-snap-align:center;box-shadow:none}
+    .todo-day-chip:hover{filter:none;transform:none;box-shadow:none;border-color:rgba(255,255,255,.16);color:var(--text)}
+    .todo-day-chip.on{border-color:rgba(100,210,193,.55);background:rgba(100,210,193,.11);color:var(--accent-2)}
+    .todo-day-num{font-size:13px;font-weight:850;line-height:1}
+    .todo-day-week{font-size:9px;font-weight:700;line-height:1;color:inherit;opacity:.8}
+    .hidden-date-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+    .todo-day-dots{display:flex;gap:2px;min-height:4px;max-width:36px;flex-wrap:wrap;justify-content:center}
+    .todo-day-dot{width:3px;height:3px;border-radius:50%;background:var(--accent-2);opacity:.9}
+    .todo-doc{border:1px solid var(--line);background:rgba(255,255,255,.025);border-radius:8px;padding:12px;line-height:1.7;overflow-x:auto}
+    .todo-doc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+    .todo-doc-path{min-width:0;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .todo-doc-edit{height:28px;min-width:48px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.035);color:var(--accent-2);font-size:12px;padding:0 10px;box-shadow:none;flex-shrink:0}
+    .todo-doc-edit:hover{filter:none;transform:none;box-shadow:none;border-color:rgba(100,210,193,.45)}
+    .todo-doc.empty{color:var(--muted);text-align:center;padding:40px 12px}
+    .todo-editor{width:100%;min-height:52vh;border:1px solid var(--line);border-radius:8px;background:rgba(17,22,21,.8);color:var(--text);padding:12px;resize:vertical;font:14px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;outline:none;display:block}
+    .md-task{width:100%;height:auto;min-height:28px;display:flex;align-items:flex-start;gap:8px;margin:3px 0;padding:3px 0;border:0;border-radius:6px;background:transparent;color:var(--text);font:inherit;text-align:left;box-shadow:none}
+    .md-task:hover{filter:none;transform:none;box-shadow:none;background:rgba(255,255,255,.035)}
+    .md-task-box{width:18px;height:18px;margin-top:4px;border:2px solid var(--line);border-radius:5px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;color:#0b100e;font-size:12px;font-weight:900}
+    .md-task.done .md-task-box{background:var(--ok);border-color:var(--ok)}
+    .md-task.done .md-task-text{text-decoration:line-through;color:var(--muted)}
+    .md-task-text{min-width:0;overflow-wrap:anywhere}
+    .schedule-create{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-bottom:12px}
+    .schedule-create textarea{min-height:44px;max-height:96px;border-radius:8px;font-size:14px}
+    .schedule-create button{height:44px;min-width:72px;border-radius:8px}
+    .inbox-create{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-bottom:12px}
+    .inbox-create textarea{min-height:44px;max-height:96px;border-radius:8px;font-size:14px}
+    .inbox-create button{height:44px;min-width:72px;border-radius:8px}
+    .event-countdown{display:inline-flex;align-items:center;height:22px;border:1px solid rgba(100,210,193,.28);border-radius:999px;padding:0 8px;margin-top:6px;color:var(--accent-2);background:rgba(100,210,193,.08);font-size:12px;font-weight:750}
+    .event-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}
+    .event-delete{height:26px;min-width:44px;border:1px solid rgba(255,145,135,.35);border-radius:6px;background:rgba(255,145,135,.06);color:var(--bad);font-size:12px;padding:0 8px;box-shadow:none}
+    .event-delete:hover{filter:none;transform:none;box-shadow:none;border-color:rgba(255,145,135,.6)}
+    .inbox-delete-one{color:var(--bad)!important;border-color:rgba(255,145,135,.35)!important;background:rgba(255,145,135,.06)!important}
+    .settings-section{border:1px solid var(--line);background:rgba(255,255,255,.025);border-radius:8px;padding:12px;margin-bottom:12px}
+    .settings-section-title{font-size:14px;font-weight:800;margin-bottom:10px}
+    .settings-grid{display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px 10px;align-items:center}
+    .settings-label{font-size:12px;color:var(--muted);font-weight:700}
+    .settings-input{width:100%;height:38px;border:1px solid var(--line);border-radius:8px;background:rgba(17,22,21,.8);color:var(--text);padding:0 10px;font:inherit;outline:none;min-width:0}
+    html[data-theme="light"] .settings-input{background:#fff}
+    .settings-add{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin:10px 0}
+    .settings-add button{height:38px;min-width:64px;border-radius:8px}
+    .dir-chip{display:flex;align-items:center;gap:8px;justify-content:space-between;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.03);padding:8px 10px;margin-bottom:6px;font-size:13px}
+    .dir-chip span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .dir-chip button{height:26px;min-width:46px;border-radius:6px;font-size:12px;background:transparent;color:var(--bad);border:1px solid rgba(255,145,135,.35);box-shadow:none}
+    .settings-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    .settings-actions .chip{height:32px}
+    .settings-meta{font-size:12px;color:var(--muted);line-height:1.55;margin-top:8px;overflow-wrap:anywhere}
     .schedule-item{border:1px solid var(--line);background:rgba(255,255,255,.03);border-radius:8px;padding:10px 12px;margin-bottom:8px}
     .schedule-time{font-size:12px;color:var(--accent-2);font-weight:750;margin-bottom:4px}
     .schedule-title{font-size:14px;font-weight:750}
@@ -1537,8 +2009,9 @@ const html = `<!doctype html>
       .conv-sidebar.open{transform:translateX(0);box-shadow:4px 0 24px rgba(0,0,0,.5)}
       .conv-sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9}
       .conv-sidebar-backdrop.open{display:block}
-      .conv-toggle{display:inline-flex!important;align-items:center;gap:4px;font-size:13px;color:var(--muted);cursor:pointer;border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:rgba(255,255,255,.03);white-space:nowrap}
-      .conv-toggle .arrow{font-size:10px}
+      .conv-toggle{height:24px;min-width:0;display:inline-flex!important;align-items:center;gap:3px;font-size:11px;color:var(--muted);cursor:pointer;border:1px solid var(--line);border-radius:999px;padding:0 8px;background:rgba(255,255,255,.03);white-space:nowrap;font-weight:700;box-shadow:none}
+      .conv-toggle .arrow{font-size:9px}
+      .conv-toggle:hover{filter:none;transform:none;box-shadow:none;border-color:rgba(100,210,193,.35);color:var(--text)}
     }
     /* mobile touch */
     .conv-item{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
@@ -1549,29 +2022,30 @@ const html = `<!doctype html>
       .conv-sidebar-backdrop{display:none!important}
     }
     @media (max-width: 640px){
-      header{padding:6px 10px;gap:5px}
+      header{padding:4px 9px;gap:4px}
       .subtitle{display:none}
-      h1{font-size:15px}
-      .state{height:26px;display:flex;align-items:center;justify-content:center;padding-inline:6px;font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+      h1{font-size:13px}
+      .state{height:24px;display:flex;align-items:center;justify-content:center;padding-inline:6px;font-size:10px;min-width:0;overflow:hidden;text-overflow:ellipsis}
       main{padding:12px}
       .msg{padding:11px 12px}
       form{padding-top:8px}
       .paradigm-row{gap:4px}
-      .paradigm-row select{max-width:38%;font-size:13px;height:34px;padding:0 10px}
-      .slot{height:34px;min-width:32px;font-size:13px;padding:0 9px}
+      .paradigm-row select{max-width:100%;font-size:13px;height:34px;padding:0 10px}
+      .slot{min-height:34px;font-size:11px;padding:4px 6px}
       .chip{height:34px;font-size:13px;padding:0 10px}
-      .model-btn{height:30px;font-size:12px;padding:0 8px}
+      .model-btn{height:26px;font-size:11px;padding:0 8px}
       .bar{grid-template-columns:1fr}
       #send{width:100%;height:46px}
       textarea{min-height:50px}
     }
     @media (max-width: 380px){
       .brand{gap:5px}
-      .mark{width:24px;height:24px;font-size:12px}
-      h1{font-size:14px}
+      .mark{width:22px;height:22px;font-size:11px}
+      h1{font-size:12px}
       .paradigm-row{gap:3px}
-      .paradigm-row select{max-width:35%;font-size:10px;height:28px;padding:0 6px}
-      .slot{height:32px;min-width:28px;font-size:12px;padding:0 7px}
+      .paradigm-row select{max-width:100%;font-size:11px;height:30px;padding:0 7px}
+      .slot{min-height:30px;font-size:10px;padding:4px 4px}
+      .slot-row{gap:4px;margin-top:1px}
       .chip{height:32px;font-size:12px;padding:0 8px}
       select{height:38px;font-size:13px}
     }
@@ -1587,6 +2061,7 @@ const html = `<!doctype html>
       </div>
       <button class="cancel-btn" id="cancelBtn" type="button" title="取消任务">✕</button>
       <button id="modelBtn" class="model-btn" type="button" title="切换模型">Pro</button>
+      <button id="settingsBtn" class="trash-btn" type="button" title="设置">⚙</button>
       <button id="clearHistory" class="trash-btn" type="button" title="清除所有记录">🗑</button>
       <div class="state" id="state">ready</div>
     </header>
@@ -1628,26 +2103,123 @@ const html = `<!doctype html>
             <button id="todoPrev" class="chip" type="button">◀</button>
             <button id="todoToday" class="chip" type="button">今天</button>
             <button id="todoNext" class="chip" type="button">▶</button>
+            <button id="todoRefresh" class="chip" type="button">刷新</button>
+            <button id="todoEdit" class="chip" type="button">编辑</button>
+            <button id="todoSave" class="chip" type="button" style="display:none">保存</button>
+            <button id="todoCancel" class="chip" type="button" style="display:none">取消</button>
+            <button id="scheduleCreate" class="chip" type="button" style="display:none">建立日程</button>
           </div>
-          <div class="todo-day-chips" id="todoDayChips"></div>
+          <div class="todo-rail-wrap">
+            <div class="todo-rail-arrow" aria-hidden="true"></div>
+            <div class="todo-day-chips" id="todoDayChips"></div>
+          </div>
+          <input id="todoDatePicker" class="hidden-date-input" type="date" />
           <div class="page-content" id="todoList"></div>
+        </div>
+        <!-- Inbox page -->
+        <div class="page-panel" id="page-inbox">
+          <div class="page-title" style="justify-content:space-between">
+            <span>📥 Inbox</span>
+            <span id="inboxPathLabel" style="font-size:12px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis"></span>
+          </div>
+          <div class="todo-toolbar">
+            <button id="inboxRefresh" class="chip" type="button">刷新</button>
+            <button id="inboxEdit" class="chip" type="button">编辑</button>
+            <button id="inboxSave" class="chip" type="button" style="display:none">保存</button>
+            <button id="inboxCancel" class="chip" type="button" style="display:none">取消</button>
+          </div>
+          <div class="inbox-create">
+            <textarea id="inboxQuickInput" placeholder="快速收集" rows="1"></textarea>
+            <button id="inboxQuickAdd" type="button">加入</button>
+          </div>
+          <div class="page-content" id="inboxList"></div>
+        </div>
+        <!-- Settings page -->
+        <div class="page-panel" id="page-settings">
+          <div class="page-title" style="justify-content:space-between">
+            <span>⚙ 设置</span>
+            <span style="font-size:12px;color:var(--muted)">索引 · 外观</span>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-title">外观</div>
+            <div class="settings-grid">
+              <div class="settings-label">主题</div>
+              <select id="themeSelect" class="settings-input">
+                <option value="dark">深色</option>
+                <option value="light">浅色</option>
+                <option value="contrast">高对比</option>
+                <option value="forest">森林</option>
+                <option value="ocean">海雾</option>
+                <option value="rose">玫瑰</option>
+                <option value="graphite">石墨</option>
+              </select>
+              <div class="settings-label">背景图片</div>
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;min-width:0">
+                <input id="customBgInput" class="settings-input" placeholder="粘贴图片 URL，或点右侧选择图片" />
+                <button id="chooseBgImageBtn" class="chip" type="button" style="height:38px;border-radius:8px">选择</button>
+                <input id="customBgFile" type="file" accept="image/*" style="display:none" />
+              </div>
+              <div class="settings-label">图片透明度</div>
+              <div style="display:flex;align-items:center;gap:10px;min-width:0">
+                <input id="bgOpacityRange" type="range" min="0" max="100" value="70" style="width:100%;min-width:0" />
+                <span id="bgOpacityValue" style="width:42px;text-align:right;font-size:12px;color:var(--muted)">70%</span>
+              </div>
+              <div class="settings-label">透明度</div>
+              <div style="display:flex;align-items:center;gap:10px;min-width:0">
+                <input id="uiOpacityRange" type="range" min="35" max="100" value="90" style="width:100%;min-width:0" />
+                <span id="uiOpacityValue" style="width:42px;text-align:right;font-size:12px;color:var(--muted)">90%</span>
+              </div>
+              <div class="settings-label"></div>
+              <div class="settings-actions" style="margin-top:0">
+                <button id="applyAppearanceBtn" class="chip" type="button">应用外观</button>
+                <button id="clearAppearanceBtn" class="chip" type="button">清除背景</button>
+              </div>
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-title">任务索引目录绑定</div>
+            <div class="settings-grid">
+              <div class="settings-label">AI 任务</div>
+              <select id="settingsTaskSelect" class="settings-input"></select>
+            </div>
+            <div class="settings-add">
+              <input id="settingsDirInput" class="settings-input" list="settingsDirOptions" placeholder="输入或选择目录路径" />
+              <button id="settingsAddDir" type="button">添加</button>
+              <datalist id="settingsDirOptions"></datalist>
+            </div>
+            <div id="settingsBoundDirs"></div>
+            <div class="settings-actions">
+              <button id="settingsSaveBindings" class="chip" type="button">保存绑定</button>
+              <button id="settingsRebuildIndex" class="chip" type="button">重建索引</button>
+              <button id="settingsRefreshDirs" class="chip" type="button">刷新目录</button>
+            </div>
+            <div class="settings-meta" id="settingsIndexMeta"></div>
+          </div>
         </div>
       </main>
     </div>
     <form id="form">
       <div class="paradigm-row">
         <select id="paradigmSelect"></select>
-        <button class="chip" id="singleTurnBtn" type="button">单轮</button>
-        <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,.csv,.xls,.xlsx,.doc,.docx" multiple style="display:none" />
-        <button class="chip" id="uploadBtn" type="button" title="上传文件">📎</button>
-        <span style="flex:1"></span>
-        <button class="slot" id="slot0" type="button" title="单击切换 · 双击绑定">+</button>
-        <button class="slot" id="slot1" type="button" title="单击切换 · 双击绑定">+</button>
+        <span class="input-actions">
+          <button class="chip quick-right" id="fastModeBtn" type="button">快捷</button>
+          <button class="chip" id="singleTurnBtn" type="button">单轮</button>
+          <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,.csv,.xls,.xlsx,.doc,.docx" multiple style="display:none" />
+          <button class="chip" id="uploadBtn" type="button" title="上传文件">📎</button>
+        </span>
+        <span class="slot-row">
+          <button class="slot" id="slot0" type="button" title="单击切换 · 双击绑定">+</button>
+          <button class="slot" id="slot1" type="button" title="单击切换 · 双击绑定">+</button>
+          <button class="slot" id="slot2" type="button" title="单击切换 · 双击绑定">+</button>
+          <button class="slot" id="slot3" type="button" title="单击切换 · 双击绑定">+</button>
+          <button class="slot" id="slot4" type="button" title="单击切换 · 双击绑定">+</button>
+        </span>
       </div>
       <div class="bar"><textarea id="input" placeholder="输入一句话" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false"></textarea><button id="send">发送</button><span class="char-count" id="charCount"></span></div>
     </form>
     <nav class="bottom-bar" id="bottomBar">
       <button class="bb-tab on" data-page="chat">💬<span>对话</span></button>
+      <button class="bb-tab" data-page="inbox">📥<span>Inbox</span></button>
       <button class="bb-tab" data-page="bills">💰<span>账单</span></button>
       <button class="bb-tab" data-page="todos">✅<span>待办</span></button>
     </nav>
@@ -1665,7 +2237,9 @@ const html = `<!doctype html>
     const modelBtn = document.getElementById('modelBtn');
     const paradigmSelect = document.getElementById('paradigmSelect');
     const singleTurnBtn = document.getElementById('singleTurnBtn');
+    const fastModeBtn = document.getElementById('fastModeBtn');
     const clearHistory = document.getElementById('clearHistory');
+    const settingsBtn = document.getElementById('settingsBtn');
     const cancelBtn = document.getElementById('cancelBtn');
     const charCount = document.getElementById('charCount');
     const toastEl = document.getElementById('toast');
@@ -1681,17 +2255,33 @@ const html = `<!doctype html>
     const paradigmCache = {};
     let slotParadigms;
     try { slotParadigms = JSON.parse(localStorage.getItem('autoobsidian_slots') || 'null'); } catch {}
-    if (!Array.isArray(slotParadigms) || slotParadigms.length !== 2) slotParadigms = [null, null];
-    const slotBtns = [document.getElementById('slot0'), document.getElementById('slot1')];
+    if (!Array.isArray(slotParadigms)) slotParadigms = [];
+    while (slotParadigms.length < 5) slotParadigms.push(null);
+    if (slotParadigms.length > 5) slotParadigms = slotParadigms.slice(0, 5);
+    const slotBtns = Array.from(document.querySelectorAll('.slot-row .slot'));
     let conversations = [];
     let activeConvId = null;
     let singleTurn = false;
+    let fastMode = false;
     let streamingAbort = null;
     let toastTimer = null;
     const TODO_TASK_PATH = '000 PARA/020 Areas/AI任务/要做的事情记录.md';
     const SCHEDULE_TASK_PATH = '000 PARA/020 Areas/AI任务/按照格式建立日程.md';
+    const INBOX_PATH = ${JSON.stringify(INBOX_PATH)};
+    const INBOX_PREFIX = ${JSON.stringify(INBOX_PREFIX)};
+    let settingsTasks = [];
+    let taskIndexBindings = {};
+    let dirSuggestionsLoaded = false;
     let todoMode = 'todos';
     let todoSelectedDate = '';
+    let todoEditing = false;
+    let todoOriginalContent = '';
+    let todoRailScrollTimer = null;
+    let todoRailSuppress = false;
+    const todoDayDotCounts = {};
+    let inboxEditing = false;
+    let inboxItems = [];
+    let inboxActivePath = '';
     const todoCache = {};
     const calendarCache = {};
     window.addEventListener('error', e => {
@@ -1772,7 +2362,7 @@ const html = `<!doctype html>
       return text;
     }
     function buildHistoryForRequest(conv) {
-      if (singleTurn || !conv || !Array.isArray(conv.messages)) return [];
+      if (singleTurn || fastMode || !conv || !Array.isArray(conv.messages)) return [];
       const recent = conv.messages.slice(0, -1).slice(-HISTORY_MAX_MESSAGES).reverse();
       const out = [];
       let total = 0;
@@ -1787,6 +2377,9 @@ const html = `<!doctype html>
         out.unshift({ role: msg.role, content });
       }
       return out;
+    }
+    function fastestModel() {
+      return availableModels.find(m => /flash|fast|lite/i.test(m)) || currentModel;
     }
     function progressLogLines(log) {
       if (!Array.isArray(log) || !log.length) return [];
@@ -1829,7 +2422,7 @@ const html = `<!doctype html>
       return '<details class="ops-log"><summary>执行记录 (' + lines.length + ')</summary>' + lines.map(line => '<div>• ' + escapeHtml(line) + '</div>').join('') + '</details>';
     }
     function progressMarkup(text) {
-      return '<div class="progress-line"><span class="thinking-dots"><span></span><span></span><span></span></span><span class="progress-text">' + escapeHtml(text || '处理中') + '</span><span class="progress-track"></span></div>';
+      return '<div class="progress-line"><span class="thinking-dots"><span></span><span></span><span></span></span><span class="progress-text">' + escapeHtml(text || '处理中') + '</span><span class="progress-track"></span><button class="inline-cancel" type="button">取消任务</button></div>';
     }
     function progressLogMarkup(log) {
       const lines = progressLogLines(log);
@@ -1839,6 +2432,18 @@ const html = `<!doctype html>
     function setUiState(text, status) {
       state.textContent = text || 'ready';
       state.dataset.status = status || '';
+      const cancellable = status === 'running' || status === 'queued';
+      cancelBtn.classList.toggle('visible', cancellable);
+    }
+    async function cancelCurrentTask() {
+      if (streamingAbort) { streamingAbort.abort(); streamingAbort = null; }
+      try {
+        const r = await fetch('/api/job/cancel', {method:'POST'});
+        const d = await r.json();
+        if (!r.ok && r.status !== 404) throw new Error(d.error || '取消失败');
+      } catch {}
+      toast('已取消');
+      setUiState('ready', '');
     }
     function renderConvList() {
       convList.innerHTML = conversations.slice().reverse().map(c => {
@@ -1959,6 +2564,11 @@ const html = `<!doctype html>
       html = html.replace(/\\*\\*([^\\*]+)\\*\\*/g, '<strong>$1</strong>');
       html = html.replace(/\\*([^\\*]+)\\*/g, '<em>$1</em>');
       html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" style="color:var(--accent-2);text-decoration:underline" target="_blank">$1</a>');
+      html = html.replace(/^([-*] \\[([ xX])\\] )(.+)$/gm, (match, prefix, checked, body, offset, full) => {
+        const line = full.slice(0, offset).split('\\n').length - 1;
+        const done = checked.toLowerCase() === 'x';
+        return '<button class="md-task' + (done ? ' done' : '') + '" type="button" data-task-line="' + line + '"><span class="md-task-box">' + (done ? '✓' : '') + '</span><span class="md-task-text">' + body + '</span></button>';
+      });
       html = html.replace(/^[*-] (.+)$/gm, '<span style="display:block;padding-left:8px">• $1</span>');
       html = html.replace(/^---$/gm, '<hr style="border:0;border-top:1px solid var(--line);margin:12px 0">');
       return html;
@@ -2053,11 +2663,12 @@ const html = `<!doctype html>
       const bubble = addStreamingBubble();
       bubble.setProgress('连接服务中');
       let fullText = '';
+      const requestModel = fastMode ? fastestModel() : currentModel;
 
       try {
         const resp = await fetch('/api/chat/stream', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({message: finalMsg, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel, history: historyForRequest, files: files.filter(f => f.isImage)}),
+          body: JSON.stringify({message: finalMsg, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: requestModel, fastMode, history: historyForRequest, files: files.filter(f => f.isImage)}),
           signal: (streamingAbort = new AbortController()).signal
         });
         if (!resp.ok) { const ed = await resp.json().catch(()=>({error:'HTTP '+resp.status})); throw new Error(ed.error||'请求失败'); }
@@ -2096,7 +2707,8 @@ const html = `<!doctype html>
                 }
                 else if (eventType === 'done') {
                   applyJobProgress(conv, { stage: 'done', progressText: '任务完成' });
-                  if (!fullText.trim()) bubble.setText(data.reply || '完成');
+                  if (!fullText.trim() && data.reply) fullText = data.reply;
+                  if (!fullText.trim()) bubble.setText('完成');
                 }
                 else if (eventType === 'error') {
                   applyJobProgress(conv, { stage: 'error', status: 'failed', progressText: data.message || '任务失败' });
@@ -2118,6 +2730,7 @@ const html = `<!doctype html>
         conv.partialReply = '';
         conv.updatedAt = nowStr();
         setUiState('ready', '');
+        if (conv.id === activeConvId) renderMessages(conv);
       } catch (err) {
         if (err.name === 'AbortError') {
           bubble.setText('[已取消]'); conv.status = 'done'; conv.stage = 'cancelled'; conv.progressText = '已取消'; conv.updatedAt = nowStr(); setUiState('ready', '');
@@ -2127,7 +2740,7 @@ const html = `<!doctype html>
             bubble.finalize();
             const fb = addStreamingBubble();
             fb.setProgress('流式连接失败，已转入队列');
-            const jr = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message: finalMsg, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel, history: historyForRequest, files: files.filter(f => f.isImage)})});
+            const jr = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message: finalMsg, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: requestModel, fastMode, history: historyForRequest, files: files.filter(f => f.isImage)})});
             const jd = await jr.json();
             if (!jr.ok) throw new Error(jd.error||'请求失败');
             applyJobProgress(conv, jd.job);
@@ -2188,9 +2801,9 @@ const html = `<!doctype html>
       input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px';
     });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSidebar(); });
-    cancelBtn.addEventListener('click', async () => {
-      if (streamingAbort) { streamingAbort.abort(); streamingAbort = null; }
-      try { const r = await fetch('/api/job/cancel', {method:'POST'}); const d = await r.json(); if (!r.ok) throw new Error(d.error); toast('已取消'); } catch (e) { /* ignore */ }
+    cancelBtn.addEventListener('click', cancelCurrentTask);
+    thread.addEventListener('click', e => {
+      if (e.target.closest('.inline-cancel')) cancelCurrentTask();
     });
     scrollHint.addEventListener('click', () => { scrollToBottom(); });
     convToggle.addEventListener('click', toggleSidebar);
@@ -2232,6 +2845,10 @@ const html = `<!doctype html>
       const item = e.target.closest('.conv-item');
       if (item) deleteConversation(item.dataset.id);
     });
+    settingsBtn.addEventListener('click', () => {
+      activatePage('settings');
+      showSettingsPage();
+    });
     function deleteConversation(id) {
       if (!confirm('删除这条对话？')) return;
       conversations = conversations.filter(c => c.id !== id);
@@ -2244,7 +2861,7 @@ const html = `<!doctype html>
     }
     // ── Page tabs ──
     let currentPage = 'chat';
-    const tabPages = { chat: showChatPage, bills: showBillsPage, todos: showTodosPage };
+    const tabPages = { chat: showChatPage, inbox: showInboxPage, bills: showBillsPage, todos: showTodosPage, settings: showSettingsPage };
     let todoClickTimer = null;
     function activatePage(page) {
       document.querySelectorAll('.bb-tab').forEach(t => t.classList.toggle('on', t.dataset.page === page));
@@ -2396,6 +3013,9 @@ const html = `<!doctype html>
     function weekday(ds) {
       return ['周日','周一','周二','周三','周四','周五','周六'][new Date(ds + 'T12:00:00').getDay()];
     }
+    function dailyNotePath(ds) {
+      return '900 Journals & Reviews/910 Daily Notes/' + ds + '.md';
+    }
     async function selectParadigmByPath(path) {
       if (!path || !paradigmSelect.querySelector('option[value="' + path.replace(/"/g,'&quot;') + '"]')) return;
       paradigmSelect.value = path;
@@ -2410,47 +3030,141 @@ const html = `<!doctype html>
       updateSlotUI();
     }
     function renderTodoChips() {
-      const days = [-3,-2,-1,0,1,2,3].map(n => addDate(todoSelectedDate, n));
-      document.getElementById('todoDayChips').innerHTML = days.map(ds => {
-        const label = ds.slice(5) + ' ' + weekday(ds);
-        return '<button class="chip todo-day-chip' + (ds === todoSelectedDate ? ' on' : '') + '" data-date="' + ds + '" type="button">' + label + '</button>';
+      const rail = document.getElementById('todoDayChips');
+      const current = todoSelectedDate || dateKey(new Date());
+      const days = [];
+      for (let i = -7; i <= 7; i++) days.push(addDate(current, i));
+      rail.innerHTML = days.map(ds => {
+        const count = Math.max(0, Number(todoDayDotCounts[ds] || 0));
+        const dots = Array.from({length: count}, () => '<span class="todo-day-dot"></span>').join('');
+        return '<button class="todo-day-chip' + (ds === current ? ' on' : '') + '" data-date="' + ds + '" type="button" title="' + ds + ' ' + weekday(ds) + '">' +
+          '<span class="todo-day-num">' + escapeHtml(ds.slice(8)) + '</span>' +
+          '<span class="todo-day-week">' + escapeHtml(weekday(ds).replace('周', '')) + '</span>' +
+          '<span class="todo-day-dots">' + dots + '</span>' +
+        '</button>';
       }).join('');
+      setTimeout(() => centerTodoRail(false), 0);
+      return days;
     }
-    async function loadTodoDate(ds) {
-      if (todoCache[ds] !== undefined) return todoCache[ds];
-      try {
-        const r = await fetch('/api/note/read?path=' + encodeURIComponent('900 Journals & Reviews/910 Daily Notes/' + ds + '.md'));
-        const data = await r.json();
-        todoCache[ds] = r.ok ? (data.content || '') : '';
-      } catch { todoCache[ds] = ''; }
+    function centerTodoRail(smooth) {
+      const rail = document.getElementById('todoDayChips');
+      const selected = rail.querySelector('.todo-day-chip.on');
+      if (!rail || !selected) return;
+      todoRailSuppress = true;
+      selected.scrollIntoView({inline:'center', block:'nearest', behavior: smooth ? 'smooth' : 'auto'});
+      setTimeout(() => { todoRailSuppress = false; }, smooth ? 350 : 80);
+    }
+    function nearestRailDate() {
+      const rail = document.getElementById('todoDayChips');
+      const chips = Array.from(rail.querySelectorAll('.todo-day-chip'));
+      if (!chips.length) return '';
+      const center = rail.getBoundingClientRect().left + rail.clientWidth / 2;
+      let best = chips[0], bestDist = Infinity;
+      chips.forEach(chip => {
+        const rect = chip.getBoundingClientRect();
+        const dist = Math.abs(rect.left + rect.width / 2 - center);
+        if (dist < bestDist) { best = chip; bestDist = dist; }
+      });
+      return best.dataset.date || '';
+    }
+    async function hydrateTodoDayDots(days) {
+      if (todoMode === 'schedule') return;
+      days.forEach(ds => { delete todoDayDotCounts[ds]; });
+      await Promise.all(days.map(async ds => {
+        try {
+          const content = await loadTodoDate(ds);
+          todoDayDotCounts[ds] = content.split('\\n').filter(line => /^\\s*[-*]\\s+\\[[ xX]\\]/.test(line)).length;
+        } catch { todoDayDotCounts[ds] = 0; }
+      }));
+      const rail = document.getElementById('todoDayChips');
+      days.forEach(ds => {
+        const box = rail.querySelector('.todo-day-chip[data-date="' + ds + '"] .todo-day-dots');
+        if (!box) return;
+        box.innerHTML = Array.from({length: Math.max(0, Number(todoDayDotCounts[ds] || 0))}, () => '<span class="todo-day-dot"></span>').join('');
+      });
+    }
+    function eventCountdown(ev) {
+      const startText = ev.allDay ? (ev.date + 'T00:00:00') : (ev.date + 'T' + (ev.startTime || '00:00'));
+      const target = new Date(startText);
+      if (!Number.isFinite(target.getTime())) return '';
+      let diff = target.getTime() - Date.now();
+      const past = diff < 0;
+      diff = Math.abs(diff);
+      const days = Math.floor(diff / 86400000);
+      diff -= days * 86400000;
+      const hours = Math.floor(diff / 3600000);
+      diff -= hours * 3600000;
+      const minutes = Math.floor(diff / 60000);
+      const body = days + '天' + hours + '小时' + minutes + '分钟';
+      return past ? '已过 ' + body : '距离 ' + body;
+    }
+    async function loadTodoDate(ds, opts) {
+      opts = opts || {};
+      if (!opts.force && todoCache[ds] !== undefined) return todoCache[ds];
+      const r = await fetch('/api/note/read?path=' + encodeURIComponent(dailyNotePath(ds)), {cache: 'no-store'});
+      const data = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(data.error || '读取日记失败');
+      todoCache[ds] = data.content || '';
       return todoCache[ds];
+    }
+    async function saveTodoDate(ds, content) {
+      const r = await fetch('/api/note/write', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path: dailyNotePath(ds), content})});
+      const data = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(data.error || '保存失败');
+      todoCache[ds] = content;
+      return data;
+    }
+    async function toggleTodoTask(lineIndex) {
+      const content = await loadTodoDate(todoSelectedDate);
+      const lines = content.split('\\n');
+      const line = lines[lineIndex] || '';
+      const m = line.match(/^(\\s*[-*]\\s+\\[)( |x|X)(\\]\\s+.*)$/);
+      if (!m) return;
+      lines[lineIndex] = m[1] + (m[2].toLowerCase() === 'x' ? ' ' : 'x') + m[3];
+      await saveTodoDate(todoSelectedDate, lines.join('\\n'));
+      toast(m[2].toLowerCase() === 'x' ? '已取消完成' : '已完成');
+      await renderTodos();
+    }
+    function setTodoControls(mode) {
+      const isSchedule = mode === 'schedule';
+      const edit = document.getElementById('todoEdit');
+      const save = document.getElementById('todoSave');
+      const cancel = document.getElementById('todoCancel');
+      const create = document.getElementById('scheduleCreate');
+      edit.style.display = 'none';
+      save.style.display = (!isSchedule && todoEditing) ? '' : 'none';
+      cancel.style.display = (!isSchedule && todoEditing) ? '' : 'none';
+      create.style.display = isSchedule ? '' : 'none';
     }
     async function renderTodos() {
       await selectParadigmByPath(TODO_TASK_PATH);
-      document.getElementById('todoTitle').textContent = '✅ 待办';
+      document.getElementById('todoTitle').textContent = '📄 日记';
       document.getElementById('todoDate').textContent = todoSelectedDate + ' ' + weekday(todoSelectedDate);
-      renderTodoChips();
+      const railDays = renderTodoChips();
+      setTodoControls('todos');
       document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">加载中...</div>';
       const content = await loadTodoDate(todoSelectedDate);
-      const todos = content.split('\\n').filter(l => l.match(/^[-*] \[.\]/));
-      const pending = todos.filter(l => l.match(/^[-*] \[ \]/));
-      const done = todos.filter(l => l.match(/^[-*] \[x\]/i));
-      if (!todos.length) {
-        document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">这天暂无待办<br><small>' + todoSelectedDate + '</small></div>';
+      todoOriginalContent = content;
+      if (todoEditing) {
+        document.getElementById('todoList').innerHTML = '<textarea id="todoEditor" class="todo-editor" spellcheck="false"></textarea>';
+        document.getElementById('todoEditor').value = content || '# ' + todoSelectedDate + '\\n\\n';
         return;
       }
-      document.getElementById('todoList').innerHTML =
-        (pending.length ? '<div style="font-size:13px;color:var(--muted);margin-bottom:8px">待完成 (' + pending.length + ')</div>' : '') +
-        pending.map(l => '<div class="todo-item"><div class="todo-check"></div><div class="todo-text">' + escapeHtml(l.replace(/^[-*] \[.\] /,'')) + '</div></div>').join('') +
-        (done.length ? '<div style="font-size:13px;color:var(--muted);margin:16px 0 8px">已完成 (' + done.length + ')</div>' : '') +
-        done.map(l => '<div class="todo-item"><div class="todo-check done"></div><div class="todo-text done">' + escapeHtml(l.replace(/^[-*] \[x\] /i,'')) + '</div></div>').join('');
+      const docHead = '<div class="todo-doc-head"><div class="todo-doc-path">' + escapeHtml(dailyNotePath(todoSelectedDate)) + '</div><button class="todo-doc-edit" type="button">编辑</button></div>';
+      document.getElementById('todoList').innerHTML = content.trim()
+        ? '<div class="todo-doc">' + docHead + formatMarkdown(content) + '</div>'
+        : '<div class="todo-doc empty">' + docHead + '<div style="padding:28px 0">这天暂无日记</div></div>';
+      hydrateTodoDayDots(railDays);
     }
     async function renderSchedule() {
       await selectParadigmByPath(SCHEDULE_TASK_PATH);
       document.getElementById('todoTitle').textContent = '🗓️ 时刻表预览';
       document.getElementById('todoDate').textContent = todoSelectedDate + ' 起 7 天';
       renderTodoChips();
+      todoEditing = false;
+      setTodoControls('schedule');
       document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">加载中...</div>';
+      const createBox = '<div class="schedule-create"><textarea id="scheduleQuickInput" placeholder="输入日程" rows="1"></textarea><button id="scheduleQuickSend" type="button">建立</button></div>';
       const key = todoSelectedDate + ':7';
       if (!calendarCache[key]) {
         const r = await fetch('/api/calendar?start=' + encodeURIComponent(todoSelectedDate) + '&days=7');
@@ -2459,22 +3173,40 @@ const html = `<!doctype html>
         calendarCache[key] = d.events || [];
       }
       const events = calendarCache[key];
+      Object.keys(todoDayDotCounts).forEach(k => delete todoDayDotCounts[k]);
+      events.forEach(ev => { todoDayDotCounts[ev.date] = (todoDayDotCounts[ev.date] || 0) + 1; });
+      renderTodoChips();
       if (!events.length) {
-        document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">这 7 天暂无日程</div>';
+        document.getElementById('todoList').innerHTML = createBox + '<div style="color:var(--muted);text-align:center;padding:40px">这 7 天暂无日程</div>';
+        bindScheduleQuickCreate();
         return;
       }
       let lastDate = '';
-      document.getElementById('todoList').innerHTML = events.map(ev => {
+      document.getElementById('todoList').innerHTML = createBox + events.map(ev => {
         const head = ev.date !== lastDate ? '<div style="font-size:13px;color:var(--muted);margin:14px 0 8px">' + ev.date + ' ' + weekday(ev.date) + '</div>' : '';
         lastDate = ev.date;
         const time = ev.allDay ? '全天' : ((ev.startTime || '--:--') + (ev.endTime ? ' - ' + ev.endTime : ''));
         const meta = [ev.location, ev.path].filter(Boolean).map(escapeHtml).join(' · ');
-        return head + '<div class="schedule-item"><div class="schedule-time">' + escapeHtml(time) + '</div><div class="schedule-title">' + escapeHtml(ev.title) + '</div>' + (meta ? '<div class="schedule-meta">' + meta + '</div>' : '') + '</div>';
+        const countdown = eventCountdown(ev);
+        return head + '<div class="schedule-item" data-event-path="' + escapeHtml(ev.path || '') + '"><div class="schedule-time">' + escapeHtml(time) + '</div><div class="schedule-title">' + escapeHtml(ev.title) + '</div><div class="event-actions">' + (countdown ? '<div class="event-countdown">' + escapeHtml(countdown) + '</div>' : '<span></span>') + '<button class="event-delete" type="button">删除</button></div>' + (meta ? '<div class="schedule-meta">' + meta + '</div>' : '') + '</div>';
       }).join('');
+      bindScheduleQuickCreate();
+    }
+    function bindScheduleQuickCreate() {
+      const btn = document.getElementById('scheduleQuickSend');
+      const box = document.getElementById('scheduleQuickInput');
+      if (!btn || !box) return;
+      btn.addEventListener('click', async () => {
+        const text = box.value.trim();
+        if (!text) return;
+        await selectParadigmByPath(SCHEDULE_TASK_PATH);
+        activatePage('chat');
+        submit(text);
+      });
     }
     async function showTodosPage(mode) {
       if (!todoSelectedDate) todoSelectedDate = dateKey(new Date());
-      if (mode) todoMode = mode;
+      if (mode) { todoMode = mode; todoEditing = false; }
       try {
         if (todoMode === 'schedule') await renderSchedule();
         else await renderTodos();
@@ -2482,13 +3214,471 @@ const html = `<!doctype html>
         document.getElementById('todoList').innerHTML = '<div style="color:var(--bad);text-align:center;padding:40px">加载失败: ' + escapeHtml(e.message) + '</div>';
       }
     }
-    document.getElementById('todoPrev').addEventListener('click', () => { if (!todoSelectedDate) todoSelectedDate = dateKey(new Date()); todoSelectedDate = addDate(todoSelectedDate, -1); showTodosPage(); });
-    document.getElementById('todoToday').addEventListener('click', () => { todoSelectedDate = dateKey(new Date()); showTodosPage(); });
-    document.getElementById('todoNext').addEventListener('click', () => { if (!todoSelectedDate) todoSelectedDate = dateKey(new Date()); todoSelectedDate = addDate(todoSelectedDate, 1); showTodosPage(); });
+    document.getElementById('todoPrev').addEventListener('click', () => { if (!todoSelectedDate) todoSelectedDate = dateKey(new Date()); todoEditing = false; todoSelectedDate = addDate(todoSelectedDate, -1); showTodosPage(); });
+    document.getElementById('todoToday').addEventListener('click', () => { todoEditing = false; todoSelectedDate = dateKey(new Date()); showTodosPage(); });
+    document.getElementById('todoNext').addEventListener('click', () => { if (!todoSelectedDate) todoSelectedDate = dateKey(new Date()); todoEditing = false; todoSelectedDate = addDate(todoSelectedDate, 1); showTodosPage(); });
+    document.getElementById('todoRefresh').addEventListener('click', async () => {
+      if (!todoSelectedDate) todoSelectedDate = dateKey(new Date());
+      todoEditing = false;
+      if (todoMode === 'schedule') {
+        delete calendarCache[todoSelectedDate + ':7'];
+        showTodosPage('schedule');
+        return;
+      }
+      delete todoCache[todoSelectedDate];
+      try { await loadTodoDate(todoSelectedDate, {force: true}); } catch(e) { toast(e.message || '读取失败'); }
+      showTodosPage('todos');
+    });
     document.getElementById('todoDayChips').addEventListener('click', e => {
       const btn = e.target.closest('.todo-day-chip'); if (!btn) return;
+      if (btn.dataset.date === todoSelectedDate) {
+        const picker = document.getElementById('todoDatePicker');
+        if (picker) {
+          picker.value = todoSelectedDate || dateKey(new Date());
+          try { if (picker.showPicker) picker.showPicker(); else picker.click(); } catch { picker.click(); }
+        }
+        return;
+      }
+      todoEditing = false;
       todoSelectedDate = btn.dataset.date;
       showTodosPage();
+    });
+    document.getElementById('todoDayChips').addEventListener('scroll', () => {
+      if (todoRailSuppress) return;
+      clearTimeout(todoRailScrollTimer);
+      todoRailScrollTimer = setTimeout(() => {
+        const ds = nearestRailDate();
+        if (!ds || ds === todoSelectedDate) return;
+        todoEditing = false;
+        todoSelectedDate = ds;
+        showTodosPage();
+      }, 180);
+    }, {passive:true});
+    document.getElementById('todoDatePicker').addEventListener('change', e => {
+      if (!e.target.value) return;
+      todoEditing = false;
+      todoSelectedDate = e.target.value;
+      showTodosPage();
+    });
+    document.getElementById('todoList').addEventListener('click', async e => {
+      const eventDelete = e.target.closest('.event-delete');
+      if (eventDelete) {
+        const item = e.target.closest('.schedule-item');
+        const path = item?.dataset.eventPath || '';
+        if (!path || !confirm('删除这个日程事件？')) return;
+        try {
+          const r = await fetch('/api/calendar', {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path})});
+          const d = await r.json().catch(()=>({}));
+          if (!r.ok) throw new Error(d.error || '删除失败');
+          Object.keys(calendarCache).forEach(k => delete calendarCache[k]);
+          toast('已删除事件');
+          showTodosPage('schedule');
+        } catch(err) { toast(err.message || '删除失败'); }
+        return;
+      }
+      if (e.target.closest('.todo-doc-edit')) {
+        todoMode = 'todos';
+        todoEditing = true;
+        renderTodos();
+        return;
+      }
+      const task = e.target.closest('.md-task');
+      if (!task || todoMode !== 'todos' || todoEditing) return;
+      try { await toggleTodoTask(parseInt(task.dataset.taskLine, 10)); }
+      catch(err) { toast(err.message || '更新失败'); }
+    });
+    document.getElementById('todoEdit').addEventListener('click', () => { todoMode = 'todos'; todoEditing = true; renderTodos(); });
+    document.getElementById('todoCancel').addEventListener('click', () => { todoEditing = false; showTodosPage('todos'); });
+    document.getElementById('todoSave').addEventListener('click', async () => {
+      const editor = document.getElementById('todoEditor');
+      if (!editor) return;
+      try {
+        await saveTodoDate(todoSelectedDate, editor.value);
+        todoEditing = false;
+        toast('已保存');
+        showTodosPage('todos');
+      } catch(e) { toast(e.message || '保存失败'); }
+    });
+    document.getElementById('scheduleCreate').addEventListener('click', async () => {
+      const box = document.getElementById('scheduleQuickInput');
+      if (box) { box.focus(); return; }
+      await selectParadigmByPath(SCHEDULE_TASK_PATH);
+      activatePage('chat');
+      input.focus();
+    });
+
+    async function loadInbox(opts) {
+      opts = opts || {};
+      if (!opts.force && inboxItems.length) return inboxItems;
+      const r = await fetch('/api/inbox?limit=40', {cache: 'no-store'});
+      const data = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(data.error || '读取 Inbox 失败');
+      inboxItems = data.notes || [];
+      if (!inboxActivePath && inboxItems[0]) inboxActivePath = inboxItems[0].path;
+      return inboxItems;
+    }
+    function activeInboxItem() {
+      return inboxItems.find(item => item.path === inboxActivePath) || inboxItems[0] || null;
+    }
+    async function saveInbox(path, content) {
+      const r = await fetch('/api/note/write', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path, content})});
+      const data = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(data.error || '保存 Inbox 失败');
+      const item = inboxItems.find(x => x.path === path);
+      if (item) item.content = content;
+      return data;
+    }
+    async function appendInboxItem(text) {
+      const r = await fetch('/api/inbox', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})});
+      const data = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(data.error || '加入失败');
+      inboxActivePath = data.path || '';
+      inboxItems = [];
+      await loadInbox({force: true});
+    }
+    async function toggleInboxTask(path, lineIndex) {
+      const item = inboxItems.find(x => x.path === path);
+      const content = item ? item.content : '';
+      const lines = content.split('\\n');
+      const line = lines[lineIndex] || '';
+      const m = line.match(/^(\\s*[-*]\\s+\\[)( |x|X)(\\]\\s+.*)$/);
+      if (!m) return;
+      lines[lineIndex] = m[1] + (m[2].toLowerCase() === 'x' ? ' ' : 'x') + m[3];
+      await saveInbox(path, lines.join('\\n'));
+      toast(m[2].toLowerCase() === 'x' ? '已取消完成' : '已完成');
+      await renderInbox();
+    }
+    function setInboxControls() {
+      document.getElementById('inboxEdit').style.display = inboxEditing ? 'none' : '';
+      document.getElementById('inboxSave').style.display = inboxEditing ? '' : 'none';
+      document.getElementById('inboxCancel').style.display = inboxEditing ? '' : 'none';
+      document.querySelector('.inbox-create').style.display = inboxEditing ? 'none' : 'grid';
+    }
+    async function renderInbox() {
+      document.getElementById('inboxPathLabel').textContent = INBOX_PREFIX;
+      setInboxControls();
+      const list = document.getElementById('inboxList');
+      list.innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">加载中...</div>';
+      await loadInbox();
+      const active = activeInboxItem();
+      if (inboxEditing) {
+        list.innerHTML = '<textarea id="inboxEditor" class="todo-editor" spellcheck="false"></textarea>';
+        document.getElementById('inboxEditor').value = active ? active.content : '';
+        return;
+      }
+      if (!inboxItems.length) {
+        list.innerHTML = '<div class="todo-doc empty">Inbox 为空<br><small>' + escapeHtml(INBOX_PREFIX) + '</small></div>';
+        return;
+      }
+      list.innerHTML = inboxItems.map(item => {
+        const meta = [item.updatedAt, item.size ? item.size + ' 字符' : ''].filter(Boolean).join(' · ');
+        return '<div class="schedule-item inbox-note" data-path="' + escapeHtml(item.path) + '">' +
+          '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px">' +
+          '<button class="chip inbox-open" type="button" style="height:28px;font-size:12px;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(item.title) + '</button>' +
+          '<span style="display:flex;gap:6px;flex-shrink:0"><button class="chip inbox-edit-one" type="button" style="height:28px;font-size:12px">编辑</button><button class="chip inbox-delete-one" type="button" style="height:28px;font-size:12px">删除</button></span>' +
+          '</div>' +
+          '<div class="schedule-meta">' + escapeHtml(meta) + '</div>' +
+          '<div class="todo-doc" style="margin-top:8px;padding:10px">' + formatMarkdown((item.content || '').slice(0, 2000)) + '</div>' +
+          '</div>';
+      }).join('');
+    }
+    async function showInboxPage() {
+      try { await renderInbox(); }
+      catch(e) { document.getElementById('inboxList').innerHTML = '<div style="color:var(--bad);text-align:center;padding:40px">加载失败: ' + escapeHtml(e.message) + '</div>'; }
+    }
+    document.getElementById('inboxRefresh').addEventListener('click', async () => { inboxEditing = false; inboxItems = []; await showInboxPage(); });
+    document.getElementById('inboxEdit').addEventListener('click', () => { inboxEditing = true; renderInbox(); });
+    document.getElementById('inboxCancel').addEventListener('click', () => { inboxEditing = false; showInboxPage(); });
+    document.getElementById('inboxSave').addEventListener('click', async () => {
+      const editor = document.getElementById('inboxEditor');
+      if (!editor) return;
+      const active = activeInboxItem();
+      if (!active) return;
+      try {
+        await saveInbox(active.path, editor.value);
+        inboxEditing = false;
+        toast('已保存 Inbox');
+        showInboxPage();
+      } catch(e) { toast(e.message || '保存失败'); }
+    });
+    document.getElementById('inboxQuickAdd').addEventListener('click', async () => {
+      const box = document.getElementById('inboxQuickInput');
+      const text = box.value.trim();
+      if (!text) return;
+      try {
+        await appendInboxItem(text);
+        box.value = '';
+        toast('已加入 Inbox');
+        showInboxPage();
+      } catch(e) { toast(e.message || '加入失败'); }
+    });
+    document.getElementById('inboxQuickInput').addEventListener('keydown', e => {
+      if ((e.key === 'Enter' && !e.shiftKey) || (e.key === 'Enter' && e.ctrlKey)) {
+        e.preventDefault();
+        document.getElementById('inboxQuickAdd').click();
+      }
+    });
+    document.getElementById('inboxList').addEventListener('click', async e => {
+      const note = e.target.closest('.inbox-note');
+      if (note && e.target.closest('.inbox-edit-one')) {
+        inboxActivePath = note.dataset.path || '';
+        inboxEditing = true;
+        renderInbox();
+        return;
+      }
+      if (note && e.target.closest('.inbox-delete-one')) {
+        const path = note.dataset.path || '';
+        if (!path || !confirm('删除这条 Inbox？')) return;
+        try {
+          const r = await fetch('/api/inbox', {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path})});
+          const d = await r.json().catch(()=>({}));
+          if (!r.ok) throw new Error(d.error || '删除失败');
+          inboxItems = inboxItems.filter(item => item.path !== path);
+          if (inboxActivePath === path) inboxActivePath = '';
+          toast('已删除');
+          renderInbox();
+        } catch(err) { toast(err.message || '删除失败'); }
+        return;
+      }
+      const task = e.target.closest('.md-task');
+      if (!task || inboxEditing) return;
+      const parent = e.target.closest('.inbox-note');
+      if (!parent) return;
+      try { await toggleInboxTask(parent.dataset.path || '', parseInt(task.dataset.taskLine, 10)); }
+      catch(err) { toast(err.message || '更新失败'); }
+    });
+
+    function normalizeBackgroundInput(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      if (/^(https?:)?\\/\\//i.test(raw) || raw.startsWith('/') || raw.startsWith('data:image/')) {
+        return 'url("' + raw.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"') + '")';
+      }
+      return raw;
+    }
+    function currentBackgroundInputValue() {
+      const input = document.getElementById('customBgInput');
+      if (!input) return '';
+      if (input.dataset.bgValue && input.value === '本地图片已保存') return input.dataset.bgValue;
+      return input.value;
+    }
+    function readBackgroundImage(file) {
+      return new Promise((resolve, reject) => {
+        if (!file || !file.type.startsWith('image/')) { reject(new Error('请选择图片文件')); return; }
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('读取图片失败'));
+        reader.onload = () => {
+          const img = new Image();
+          img.onerror = () => reject(new Error('图片格式无法识别'));
+          img.onload = () => {
+            const maxSide = 1800;
+            const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(img.width * scale));
+            canvas.height = Math.max(1, Math.round(img.height * scale));
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', 0.86));
+          };
+          img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+    function applyAppearance(opts) {
+      opts = opts || {};
+      const storedBg = (() => { try { return localStorage.getItem('claudenotes_customBg') || ''; } catch { return ''; } })();
+      const storedOpacity = (() => { try { return localStorage.getItem('claudenotes_uiOpacity') || '90'; } catch { return '90'; } })();
+      const storedBgOpacity = (() => { try { return localStorage.getItem('claudenotes_bgOpacity') || '70'; } catch { return '70'; } })();
+      const rawBg = Object.prototype.hasOwnProperty.call(opts, 'background') ? opts.background : storedBg;
+      const opacityValue = Object.prototype.hasOwnProperty.call(opts, 'opacity') ? opts.opacity : storedOpacity;
+      const bgOpacityValue = Object.prototype.hasOwnProperty.call(opts, 'bgOpacity') ? opts.bgOpacity : storedBgOpacity;
+      const opacity = Math.min(100, Math.max(35, parseInt(opacityValue || '90', 10) || 90));
+      const bgOpacity = Math.min(100, Math.max(0, parseInt(bgOpacityValue || '70', 10) || 0));
+      const bg = normalizeBackgroundInput(rawBg);
+      if (bg) document.documentElement.style.setProperty('--custom-bg', bg);
+      else document.documentElement.style.removeProperty('--custom-bg');
+      document.documentElement.style.setProperty('--chrome-alpha', (opacity / 100).toFixed(2));
+      document.documentElement.style.setProperty('--bg-image-alpha', (bgOpacity / 100).toFixed(2));
+      const bgInput = document.getElementById('customBgInput');
+      const bgOpacityRange = document.getElementById('bgOpacityRange');
+      const bgOpacityValueEl = document.getElementById('bgOpacityValue');
+      const opacityRange = document.getElementById('uiOpacityRange');
+      const opacityValueEl = document.getElementById('uiOpacityValue');
+      if (bgInput) {
+        if (String(rawBg || '').startsWith('data:image/')) {
+          bgInput.value = '本地图片已保存';
+          bgInput.dataset.bgValue = rawBg;
+        } else {
+          bgInput.value = rawBg || '';
+          bgInput.dataset.bgValue = '';
+        }
+      }
+      if (bgOpacityRange) bgOpacityRange.value = String(bgOpacity);
+      if (bgOpacityValueEl) bgOpacityValueEl.textContent = bgOpacity + '%';
+      if (opacityRange) opacityRange.value = String(opacity);
+      if (opacityValueEl) opacityValueEl.textContent = opacity + '%';
+      if (opts.save) {
+        try {
+          if (rawBg) localStorage.setItem('claudenotes_customBg', rawBg);
+          else localStorage.removeItem('claudenotes_customBg');
+          localStorage.setItem('claudenotes_uiOpacity', String(opacity));
+          localStorage.setItem('claudenotes_bgOpacity', String(bgOpacity));
+        } catch {}
+      }
+    }
+    function applyTheme(theme) {
+      const value = ['dark', 'light', 'contrast', 'forest', 'ocean', 'rose', 'graphite'].includes(theme) ? theme : 'dark';
+      document.documentElement.dataset.theme = value === 'dark' ? '' : value;
+      const select = document.getElementById('themeSelect');
+      if (select) select.value = value;
+      try { localStorage.setItem('claudenotes_theme', value); } catch {}
+      applyAppearance();
+    }
+    function currentSettingsTaskPath() {
+      return document.getElementById('settingsTaskSelect')?.value || paradigmSelect.value || '';
+    }
+    function normalizeDirInput(value) {
+      return String(value || '').trim().replace(/^\\/+|\\/+$/g, '');
+    }
+    async function loadTaskIndexBindings() {
+      const r = await fetch('/api/task-index/bindings', {cache:'no-store'});
+      const d = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(d.error || '读取绑定失败');
+      taskIndexBindings = d.bindings || {};
+      return taskIndexBindings;
+    }
+    async function loadDirSuggestions(force) {
+      if (dirSuggestionsLoaded && !force) return;
+      const r = await fetch('/api/note-dirs', {cache:'no-store'});
+      const d = await r.json().catch(()=>({}));
+      if (!r.ok) throw new Error(d.error || '读取目录失败');
+      document.getElementById('settingsDirOptions').innerHTML = (d.dirs || []).map(dir => '<option value="' + escapeHtml(dir.path) + '">' + escapeHtml(dir.count + ' notes') + '</option>').join('');
+      dirSuggestionsLoaded = true;
+    }
+    function renderSettingsTasks() {
+      const select = document.getElementById('settingsTaskSelect');
+      if (!select) return;
+      const current = select.value || paradigmSelect.value || (settingsTasks[0]?.path || '');
+      select.innerHTML = settingsTasks.map(t => '<option value="' + t.path.replace(/"/g,'&quot;') + '">' + escapeHtml(t.name) + '</option>').join('');
+      if (current && select.querySelector('option[value="' + current.replace(/"/g,'&quot;') + '"]')) select.value = current;
+    }
+    function renderBoundDirs() {
+      const taskPath = currentSettingsTaskPath();
+      const dirs = Array.isArray(taskIndexBindings[taskPath]) ? taskIndexBindings[taskPath] : [];
+      document.getElementById('settingsBoundDirs').innerHTML = dirs.length
+        ? dirs.map(dir => '<div class="dir-chip" data-dir="' + escapeHtml(dir) + '"><span>' + escapeHtml(dir) + '</span><button type="button" class="settings-remove-dir">删除</button></div>').join('')
+        : '<div class="todo-doc empty" style="padding:24px 12px">未绑定目录</div>';
+      document.getElementById('settingsIndexMeta').textContent = taskPath ? '保存后，此任务会优先使用这些目录；重建索引会立即刷新缓存。' : '';
+    }
+    async function showSettingsPage() {
+      try {
+        renderSettingsTasks();
+        await Promise.all([loadTaskIndexBindings(), loadDirSuggestions(false)]);
+        renderSettingsTasks();
+        renderBoundDirs();
+        const savedTheme = (() => { try { return localStorage.getItem('claudenotes_theme') || 'dark'; } catch { return 'dark'; } })();
+        applyTheme(savedTheme);
+        applyAppearance();
+      } catch(e) {
+        document.getElementById('settingsIndexMeta').textContent = '加载失败: ' + (e.message || e);
+      }
+    }
+    document.getElementById('themeSelect').addEventListener('change', e => {
+      applyTheme(e.target.value);
+      toast('主题已切换');
+    });
+    document.getElementById('uiOpacityRange').addEventListener('input', e => {
+      applyAppearance({ opacity: e.target.value, bgOpacity: document.getElementById('bgOpacityRange').value, background: currentBackgroundInputValue() });
+    });
+    document.getElementById('uiOpacityRange').addEventListener('change', e => {
+      applyAppearance({ opacity: e.target.value, bgOpacity: document.getElementById('bgOpacityRange').value, background: currentBackgroundInputValue(), save: true });
+      toast('透明度已保存');
+    });
+    document.getElementById('bgOpacityRange').addEventListener('input', e => {
+      applyAppearance({ bgOpacity: e.target.value, opacity: document.getElementById('uiOpacityRange').value, background: currentBackgroundInputValue() });
+    });
+    document.getElementById('bgOpacityRange').addEventListener('change', e => {
+      applyAppearance({ bgOpacity: e.target.value, opacity: document.getElementById('uiOpacityRange').value, background: currentBackgroundInputValue(), save: true });
+      toast('图片透明度已保存');
+    });
+    document.getElementById('customBgInput').addEventListener('input', e => {
+      e.target.dataset.bgValue = '';
+    });
+    document.getElementById('chooseBgImageBtn').addEventListener('click', () => {
+      document.getElementById('customBgFile').click();
+    });
+    document.getElementById('customBgFile').addEventListener('change', async e => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        toast('正在处理背景图片');
+        const dataUrl = await readBackgroundImage(file);
+        applyAppearance({ background: dataUrl, opacity: document.getElementById('uiOpacityRange').value, bgOpacity: document.getElementById('bgOpacityRange').value, save: true });
+        toast('背景图片已保存');
+      } catch(err) {
+        toast(err.message || '背景图片设置失败');
+      } finally {
+        e.target.value = '';
+      }
+    });
+    document.getElementById('applyAppearanceBtn').addEventListener('click', () => {
+      applyAppearance({ background: currentBackgroundInputValue(), opacity: document.getElementById('uiOpacityRange').value, bgOpacity: document.getElementById('bgOpacityRange').value, save: true });
+      toast('外观已应用');
+    });
+    document.getElementById('clearAppearanceBtn').addEventListener('click', () => {
+      document.getElementById('customBgInput').value = '';
+      document.getElementById('customBgInput').dataset.bgValue = '';
+      applyAppearance({ background: '', opacity: document.getElementById('uiOpacityRange').value, bgOpacity: document.getElementById('bgOpacityRange').value, save: true });
+      toast('背景已清除');
+    });
+    document.getElementById('settingsTaskSelect').addEventListener('change', () => {
+      renderBoundDirs();
+    });
+    document.getElementById('settingsAddDir').addEventListener('click', () => {
+      const inputEl = document.getElementById('settingsDirInput');
+      const dir = normalizeDirInput(inputEl.value);
+      const taskPath = currentSettingsTaskPath();
+      if (!dir || !taskPath) return;
+      const dirs = Array.isArray(taskIndexBindings[taskPath]) ? taskIndexBindings[taskPath].slice() : [];
+      if (!dirs.includes(dir)) dirs.push(dir);
+      taskIndexBindings[taskPath] = dirs;
+      inputEl.value = '';
+      renderBoundDirs();
+    });
+    document.getElementById('settingsBoundDirs').addEventListener('click', e => {
+      const btn = e.target.closest('.settings-remove-dir');
+      if (!btn) return;
+      const taskPath = currentSettingsTaskPath();
+      const dir = btn.closest('.dir-chip')?.dataset.dir || '';
+      taskIndexBindings[taskPath] = (taskIndexBindings[taskPath] || []).filter(item => item !== dir);
+      renderBoundDirs();
+    });
+    document.getElementById('settingsSaveBindings').addEventListener('click', async () => {
+      const taskPath = currentSettingsTaskPath();
+      try {
+        const r = await fetch('/api/task-index/bindings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({taskPath, directories: taskIndexBindings[taskPath] || []})});
+        const d = await r.json().catch(()=>({}));
+        if (!r.ok) throw new Error(d.error || '保存失败');
+        taskIndexBindings[taskPath] = d.directories || [];
+        document.getElementById('settingsIndexMeta').textContent = '已保存并重建索引：' + (d.indexPath || '');
+        toast('索引绑定已保存');
+        renderBoundDirs();
+      } catch(e) { toast(e.message || '保存失败'); }
+    });
+    document.getElementById('settingsRebuildIndex').addEventListener('click', async () => {
+      const taskPath = currentSettingsTaskPath();
+      try {
+        const r = await fetch('/api/task-index/build', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({taskPath})});
+        const d = await r.json().catch(()=>({}));
+        if (!r.ok) throw new Error(d.error || '重建失败');
+        document.getElementById('settingsIndexMeta').textContent = '已重建：' + (d.path || '');
+        toast('索引已重建');
+      } catch(e) { toast(e.message || '重建失败'); }
+    });
+    document.getElementById('settingsRefreshDirs').addEventListener('click', async () => {
+      try { await loadDirSuggestions(true); toast('目录已刷新'); }
+      catch(e) { toast(e.message || '刷新失败'); }
     });
 
     // ── File upload ──
@@ -2553,6 +3743,12 @@ const html = `<!doctype html>
       try { localStorage.setItem('claudenotes_singleTurn', singleTurn ? '1' : '0'); } catch {}
       toast(singleTurn ? '单轮模式：每次新建对话' : '连续模式：在同一对话中继续');
     });
+    fastModeBtn.addEventListener('click', () => {
+      fastMode = !fastMode;
+      fastModeBtn.classList.toggle('on', fastMode);
+      try { localStorage.setItem('claudenotes_fastMode', fastMode ? '1' : '0'); } catch {}
+      toast(fastMode ? '快捷模式：少历史、优先快速模型' : '已关闭快捷模式');
+    });
     modelBtn.addEventListener('click', () => {
       const idx = availableModels.indexOf(currentModel);
       currentModel = availableModels[(idx + 1) % availableModels.length] || currentModel;
@@ -2567,6 +3763,7 @@ const html = `<!doctype html>
       localStorage.removeItem('claudenotes_convs');
       localStorage.removeItem('claudenotes_model');
       localStorage.removeItem('claudenotes_singleTurn');
+      localStorage.removeItem('claudenotes_fastMode');
       localStorage.removeItem('claudenotes_paradigm');
       saveConversations(); renderConvList();
       thread.innerHTML = '<div class="empty-state"><div class="icon">🗑</div><div class="text">所有记录已清除</div></div>';
@@ -2586,6 +3783,7 @@ const html = `<!doctype html>
     async function loadParadigms() {
       const r = await fetch('/api/tasks'); const d = await r.json();
       if (!r.ok) throw new Error(d.error);
+      settingsTasks = d.tasks || [];
       paradigmSelect.innerHTML = d.tasks.map(t => '<option value="' + t.path.replace(/"/g,'&quot;') + '">' + t.name + '</option>').join('');
       if (d.tasks[0]) {
         const dr = await fetch('/api/task?path=' + encodeURIComponent(d.tasks[0].path));
@@ -2645,6 +3843,10 @@ const html = `<!doctype html>
       if (localStorage.getItem('claudenotes_singleTurn') === '1') {
         singleTurn = true; singleTurnBtn.classList.add('on');
       }
+      if (localStorage.getItem('claudenotes_fastMode') === '1') {
+        fastMode = true; fastModeBtn.classList.add('on');
+      }
+      applyTheme(localStorage.getItem('claudenotes_theme') || 'dark');
     } catch {}
 
     // ── Poll running conversations for progress ──
@@ -2758,6 +3960,7 @@ const server = http.createServer(async (req, res) => {
         message,
         task,
         model: normalizeModel(body.model),
+        fastMode: body.fastMode === true,
     reply: '',
     partialReply: '',
     error: '',
@@ -2822,7 +4025,7 @@ const server = http.createServer(async (req, res) => {
       if (!hasMessageOrFiles(body)) throw new Error('message or files is required');
       const message = String(body.message || '').trim() ? body.message : '请处理附件内容。';
       const task = body.taskPath ? { path: body.taskPath, content: body.taskContent || '' } : null;
-      const job = enqueueJob({ message, task, model: body.model, history: body.history, files: body.files });
+      const job = enqueueJob({ message, task, model: body.model, fastMode: body.fastMode === true, history: body.history, files: body.files });
       json(res, 202, { job: serializeJob(job) });
       return;
     }
@@ -2876,7 +4079,125 @@ const server = http.createServer(async (req, res) => {
         defaultModel: DEFAULT_CLAUDE_MODEL,
         models: CLAUDE_MODELS,
         jobHistoryLimit: JOB_HISTORY_LIMIT,
+        inboxPath: INBOX_PATH,
+        inboxPrefix: INBOX_PREFIX,
+        repoGraphPath: REPO_GRAPH_PATH,
       });
+      return;
+    }
+    if (url.pathname === '/api/inbox' && req.method === 'GET') {
+      const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '30', 10) || 30, 1), 80);
+      const keyword = url.searchParams.get('keyword') || 'Inbox';
+      const data = unwrap(await fnsRequest('/api/notes', { params: { vault: DEFAULT_VAULT, keyword, searchContent: false, page: 1 } }));
+      const list = (Array.isArray(data) ? data : (data?.list || []))
+        .filter((note) => String(note.path || '').startsWith(INBOX_PREFIX))
+        .sort((a, b) => Number(b.mtime || b.lastTime || 0) - Number(a.mtime || a.lastTime || 0))
+        .slice(0, limit);
+      const notes = [];
+      for (const note of list) {
+        let content = '';
+        try {
+          const noteData = unwrap(await fnsNoteGet(note.path));
+          content = String(noteData?.content || '');
+        } catch {}
+        notes.push({
+          path: note.path,
+          title: String(note.path || '').split('/').pop().replace(/\.md$/i, ''),
+          updatedAt: note.updatedAt || '',
+          createdAt: note.createdAt || '',
+          size: note.size || content.length,
+          content,
+        });
+      }
+      json(res, 200, { prefix: INBOX_PREFIX, notes });
+      return;
+    }
+    if (url.pathname === '/api/inbox' && req.method === 'POST') {
+      const body = await readBody(req);
+      const text = String(body.text || '').trim();
+      if (!text) throw new Error('text is required');
+      const now = appNow();
+      const title = text.split('\n')[0].replace(/[\\/:*?"<>|#\[\]]/g, '').replace(/\s+/g, ' ').trim().slice(0, 36) || 'Inbox';
+      const minute = now.time.slice(0, 5).replace(':', '-');
+      const notePath = `${INBOX_PREFIX}${now.date} ${minute} ${title}.md`;
+      const content = `# ${title}\n\n${text}\n`;
+      await fnsNoteSave(notePath, content);
+      json(res, 200, { ok: true, path: notePath, content });
+      return;
+    }
+    if (url.pathname === '/api/inbox' && req.method === 'DELETE') {
+      const body = await readBody(req);
+      const targetPath = String(body.path || '').trim();
+      if (!targetPath || !targetPath.startsWith(INBOX_PREFIX)) throw new Error('invalid inbox path');
+      await fnsNoteDelete(targetPath);
+      json(res, 200, { ok: true, path: targetPath });
+      return;
+    }
+    if (url.pathname === '/api/repo-graph' && req.method === 'GET') {
+      const q = url.searchParams.get('q') || '';
+      if (q) {
+        json(res, 200, repoGraphSearch({ query: q, limit: url.searchParams.get('limit') || 8 }));
+      } else {
+        const graph = loadRepoGraph();
+        json(res, 200, { root: graph.root, path: REPO_GRAPH_PATH, generatedAt: graph.generatedAt, fileCount: graph.fileCount });
+      }
+      return;
+    }
+    if (url.pathname === '/api/repo-graph/build' && req.method === 'POST') {
+      const graph = buildRepoGraph();
+      json(res, 200, { ok: true, root: graph.root, path: REPO_GRAPH_PATH, generatedAt: graph.generatedAt, fileCount: graph.fileCount });
+      return;
+    }
+    if (url.pathname === '/api/task-index' && req.method === 'GET') {
+      const taskPathParam = url.searchParams.get('taskPath') || '';
+      if (!taskPathParam || !taskPathParam.startsWith(TASKS_PREFIX)) throw new Error('invalid taskPath');
+      const p = taskIndexPath(taskPathParam);
+      let index = null;
+      try { index = JSON.parse(fs.readFileSync(p, 'utf8')); } catch {}
+      json(res, 200, { exists: Boolean(index), path: p, index });
+      return;
+    }
+    if (url.pathname === '/api/task-index/build' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body.taskPath || !String(body.taskPath).startsWith(TASKS_PREFIX)) throw new Error('invalid taskPath');
+      const taskData = unwrap(await fnsNoteGet(body.taskPath));
+      const index = await ensureTaskDirectoryIndex({ path: body.taskPath, content: taskData?.content || '' }, { force: true });
+      json(res, 200, { ok: true, path: taskIndexPath(body.taskPath), index });
+      return;
+    }
+    if (url.pathname === '/api/task-index/bindings' && req.method === 'GET') {
+      json(res, 200, { path: TASK_INDEX_BINDINGS_PATH, bindings: loadTaskIndexBindings() });
+      return;
+    }
+    if (url.pathname === '/api/task-index/bindings' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body.taskPath || !String(body.taskPath).startsWith(TASKS_PREFIX)) throw new Error('invalid taskPath');
+      const bindings = loadTaskIndexBindings();
+      bindings[body.taskPath] = normalizeBoundDirs(body.directories || []);
+      saveTaskIndexBindings(bindings);
+      const taskData = unwrap(await fnsNoteGet(body.taskPath));
+      const index = await ensureTaskDirectoryIndex({ path: body.taskPath, content: taskData?.content || '' }, { force: true });
+      json(res, 200, { ok: true, taskPath: body.taskPath, directories: bindings[body.taskPath], indexPath: taskIndexPath(body.taskPath), index });
+      return;
+    }
+    if (url.pathname === '/api/note-dirs' && req.method === 'GET') {
+      const q = String(url.searchParams.get('q') || '').toLowerCase();
+      const notes = await listVaultNotePaths();
+      const map = new Map();
+      for (const note of notes) {
+        const parts = note.path.split('/');
+        for (let i = 1; i < parts.length; i++) {
+          const dir = parts.slice(0, i).join('/');
+          if (q && !dir.toLowerCase().includes(q)) continue;
+          const item = map.get(dir) || { path: dir, count: 0 };
+          item.count++;
+          map.set(dir, item);
+        }
+      }
+      const dirs = Array.from(map.values())
+        .sort((a, b) => b.count - a.count || a.path.localeCompare(b.path, 'zh-CN'))
+        .slice(0, 300);
+      json(res, 200, { dirs });
       return;
     }
     if (url.pathname === '/api/tasks' && req.method === 'GET') {
@@ -2899,7 +4220,7 @@ const server = http.createServer(async (req, res) => {
 - 不要全库遍历；先根据用户输入提取关键词搜索。
 - 修改前优先读取目标笔记。
 - 完成后说明修改了哪条笔记和写入内容。`;
-        await fnsRequest('/api/note', { method: 'POST', body: { vault: DEFAULT_VAULT, path: defaultPath, content: defaultContent } });
+        await fnsNoteSave(defaultPath, defaultContent);
         tasks = [{ path: defaultPath, name: '默认范式' }];
       }
       json(res, 200, { prefix: TASKS_PREFIX, tasks });
@@ -2920,7 +4241,7 @@ const server = http.createServer(async (req, res) => {
       let headers = ['日期','星期','类型','备注','金额','垫付'];
       for (const f of files) {
         try {
-          const noteData = unwrap(await fnsRequest('/api/note', { params: { vault: DEFAULT_VAULT, path: f.path } }));
+          const noteData = unwrap(await fnsNoteGet(f.path));
           const content = noteData?.content || '';
           const lines = content.split('\n').filter(l => l.includes('|') && !l.includes('---'));
           for (const line of lines) {
@@ -2961,7 +4282,7 @@ const server = http.createServer(async (req, res) => {
         const dateFromPath = (eventPath.match(/\/(\d{4}-\d{2}-\d{2})\s+([^/]+)\.md$/) || [])[1] || '';
         const titleFromPath = (eventPath.match(/\/\d{4}-\d{2}-\d{2}\s+([^/]+)\.md$/) || [])[1] || eventPath.split('/').pop().replace(/\.md$/i, '');
         try {
-          const noteData = unwrap(await fnsRequest('/api/note', { params: { vault: DEFAULT_VAULT, path: eventPath } }));
+          const noteData = unwrap(await fnsNoteGet(eventPath));
           const content = noteData?.content || '';
           const fm = parseFrontmatter(content);
           const date = String(fm.date || dateFromPath || '').slice(0, 10);
@@ -2982,6 +4303,14 @@ const server = http.createServer(async (req, res) => {
       }
       events.sort((a, b) => (a.date + ' ' + (a.startTime || '99:99') + ' ' + a.title).localeCompare(b.date + ' ' + (b.startTime || '99:99') + ' ' + b.title, 'zh-CN'));
       json(res, 200, { start, end, days, events });
+      return;
+    }
+    if (url.pathname === '/api/calendar' && req.method === 'DELETE') {
+      const body = await readBody(req);
+      const eventPath = String(body.path || '').trim();
+      if (!eventPath || !eventPath.startsWith('900 Journals & Reviews/Calender/')) throw new Error('invalid calendar path');
+      await fnsNoteDelete(eventPath);
+      json(res, 200, { ok: true, path: eventPath });
       return;
     }
     if (url.pathname === '/api/parse-file' && req.method === 'POST') {
@@ -3007,21 +4336,29 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/note/read' && req.method === 'GET') {
       const path = url.searchParams.get('path');
       if (!path) throw new Error('path is required');
-      const data = unwrap(await fnsRequest('/api/note', { params: { vault: DEFAULT_VAULT, path } }));
+      const data = unwrap(await fnsNoteGet(path));
+      console.log('[note/read]', path, 'chars=' + String(data?.content || '').length);
       json(res, 200, { path, content: data?.content || '' });
+      return;
+    }
+    if (url.pathname === '/api/note/write' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body.path) throw new Error('path is required');
+      await fnsNoteSave(body.path, body.content || '');
+      json(res, 200, { ok: true, path: body.path });
       return;
     }
     if (url.pathname === '/api/task' && req.method === 'GET') {
       const path = url.searchParams.get('path');
       if (!path || !path.startsWith(TASKS_PREFIX)) throw new Error('invalid task path');
-      const data = unwrap(await fnsRequest('/api/note', { params: { vault: DEFAULT_VAULT, path } }));
+      const data = unwrap(await fnsNoteGet(path));
       json(res, 200, { path, content: data?.content || '' });
       return;
     }
     if (url.pathname === '/api/task' && req.method === 'POST') {
       const body = await readBody(req);
       if (!body.path || !body.path.startsWith(TASKS_PREFIX)) throw new Error('invalid task path');
-      await fnsRequest('/api/note', { method: 'POST', body: { vault: DEFAULT_VAULT, path: body.path, content: body.content || '' } });
+      await fnsNoteSave(body.path, body.content || '');
       json(res, 200, { ok: true });
       return;
     }
