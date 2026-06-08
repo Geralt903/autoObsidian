@@ -350,13 +350,28 @@ function normalizeModel(model) {
 
 // ── Run Claude with tool-use loop (non-streaming) ────────────────
 
-async function runClaude(userText, task, model, jobRef, history) {
+function buildUserContent(userText, files) {
+  if (!files || !files.length) return userText;
+  const content = [{ type: 'text', text: userText }];
+  for (const f of files) {
+    if (f.isImage && f.data) {
+      const [mime, b64] = f.data.split(',');
+      content.push({ type: 'image', source: { type: 'base64', media_type: f.type || 'image/png', data: b64 || f.data } });
+    } else if (f.data) {
+      content.push({ type: 'text', text: '\n=== ' + f.name + ' ===\n' + f.data });
+    }
+  }
+  return content;
+}
+
+async function runClaude(userText, task, model, jobRef, history, files) {
   if (!ANTHROPIC_AUTH_TOKEN) throw new Error('ANTHROPIC_AUTH_TOKEN is not set');
 
   const selectedModel = normalizeModel(model);
   const systemPrompt = buildSystemPrompt(task);
+  const userContent = buildUserContent(userText, files);
 
-  const messages = [...(Array.isArray(history) ? history : []), { role: 'user', content: userText }];
+  const messages = [...(Array.isArray(history) ? history : []), { role: 'user', content: userContent }];
   let reply = '';
   let rounds = 0;
 
@@ -413,12 +428,13 @@ function sseWrite(res, event, data) {
 
 // ── Run Claude with streaming ────────────────────────────────────
 
-async function runClaudeStreaming(userText, task, model, res, jobRef, history) {
+async function runClaudeStreaming(userText, task, model, res, jobRef, history, files) {
   if (!ANTHROPIC_AUTH_TOKEN) throw new Error('ANTHROPIC_AUTH_TOKEN is not set');
 
   const selectedModel = normalizeModel(model);
   const systemPrompt = buildSystemPrompt(task);
-  const messages = [...(Array.isArray(history) ? history : []), { role: 'user', content: userText }];
+  const userContent = buildUserContent(userText, files);
+  const messages = [...(Array.isArray(history) ? history : []), { role: 'user', content: userContent }];
   let fullReply = '';
   let rounds = 0;
 
@@ -499,6 +515,7 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history) {
   }
 
   sseWrite(res, 'done', { reply: fullReply || '完成' });
+  if (jobRef) jobRef.reply = fullReply || '完成';
 }
 
 // ── Job queue ────────────────────────────────────────────────────
@@ -522,7 +539,7 @@ function trimJobs() {
   if (jobs.length > JOB_HISTORY_LIMIT) jobs.length = JOB_HISTORY_LIMIT;
 }
 
-function enqueueJob({ message, task, model, history }) {
+function enqueueJob({ message, task, model, history, files }) {
   const now = appNow();
   const job = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -531,6 +548,7 @@ function enqueueJob({ message, task, model, history }) {
     task,
     model: normalizeModel(model),
     history: history || [],
+    files: files || [],
     createdAt: `${now.date} ${now.time}`,
     _aborted: false,
   };
@@ -549,7 +567,7 @@ async function processQueue() {
   job.status = 'running';
   job.startedAt = `${now.date} ${now.time}`;
   try {
-    job.reply = await runClaude(job.message, job.task, job.model, job, job.history);
+    job.reply = await runClaude(job.message, job.task, job.model, job, job.history, job.files);
     if (job._aborted) return;
     job.status = 'done';
   } catch (err) {
@@ -632,14 +650,15 @@ const html = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Claude Notes</title>
   <style>
-    :root{--bg:#0c0f10;--panel:#151917;--panel-2:#101413;--line:#2a332f;--line-soft:#202824;--text:#f7f3ea;--muted:#a8b0a7;--accent:#d4a574;--accent-2:#daa520;--ok:#8fe5a7;--bad:#ff9187;--shadow:0 18px 60px rgba(0,0,0,.34)}
+    :root{--bg:#0c0f10;--panel:#151917;--panel-2:#101413;--line:#2a332f;--line-soft:#202824;--text:#f7f3ea;--muted:#a8b0a7;--accent:#d4a574;--accent-2:#64d2c1;--ok:#8fe5a7;--bad:#ff9187;--shadow:0 18px 60px rgba(0,0,0,.34)}
     *{box-sizing:border-box}
     html,body{height:100%;max-width:100%;overflow-x:hidden}
-    body{width:100%;margin:0;background:radial-gradient(ellipse at 50% -20%,rgba(218,165,32,.08),transparent 40%),radial-gradient(ellipse at 80% 80%,rgba(100,210,193,.04),transparent 35%),linear-gradient(180deg,#111815 0,#0c0f10 50%,#080a0a 100%);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+    body{width:100%;margin:0;color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased;background:linear-gradient(180deg,#111815 0,#0c0f10 50%,#080a0a 100%)}
+    .app{width:100%;max-width:100vw;min-width:0;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;overflow:hidden}
     ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(168,176,167,.2);border-radius:99px}::-webkit-scrollbar-thumb:hover{background:rgba(168,176,167,.35)}
     .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%) translateY(-10px);z-index:99;padding:10px 20px;border-radius:999px;background:rgba(16,20,19,.96);color:var(--ok);border:1px solid rgba(143,229,167,.25);font-size:13px;font-weight:650;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;backdrop-filter:blur(20px);box-shadow:0 4px 24px rgba(0,0,0,.4)}
     .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-    header{z-index:3;padding:8px max(14px,env(safe-area-inset-left)) 8px max(14px,env(safe-area-inset-right));border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:8px;background:rgba(12,15,16,.9);position:sticky;top:0;backdrop-filter:blur(20px);box-shadow:0 1px 8px rgba(0,0,0,.15)}
+    header{z-index:3;padding:8px max(14px,env(safe-area-inset-left)) 8px max(14px,env(safe-area-inset-right));border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:8px;background:rgba(12,15,16,.9);position:sticky;top:0;backdrop-filter:blur(16px);box-shadow:0 1px 8px rgba(0,0,0,.15)}
     .brand{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
     .mark{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 10px 30px rgba(218,165,32,.18);display:grid;place-items:center;color:#0b100e;font-weight:900;font-size:14px;flex-shrink:0}
     h1{font-size:16px;margin:0;font-weight:780;letter-spacing:0;white-space:nowrap}
@@ -658,21 +677,21 @@ const html = `<!doctype html>
     .state[data-status="error"]{color:var(--bad);border-color:rgba(255,145,135,.4)}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
     /* conversation layout */
-    .conv-layout{display:flex;min-height:0;flex:1;overflow:hidden}
-    .conv-sidebar{width:260px;min-width:260px;border-right:1px solid rgba(255,255,255,.06);background:rgba(16,20,19,.5);display:flex;flex-direction:column;overflow:hidden}
+    .conv-layout{display:flex;min-height:0;flex:1;overflow:hidden;height:100%}
+    .conv-sidebar{width:260px;min-width:260px;border-right:1px solid rgba(255,255,255,.04);background:rgba(10,14,13,.55);display:flex;flex-direction:column;overflow:hidden;backdrop-filter:blur(12px)}
     .conv-sidebar-header{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:8px}
     .conv-sidebar-header span{font-size:13px;font-weight:700;color:var(--muted)}
     .conv-list{flex:1;overflow-y:auto;padding:6px 8px}
     .conv-item{padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:3px;transition:all .15s;border:1px solid transparent}
     .conv-item:hover{background:rgba(255,255,255,.03)}
-    .conv-item.active{background:rgba(212,165,116,.08);border-color:rgba(212,165,116,.2)}
+    .conv-item.active{background:rgba(100,210,193,.06);border-color:rgba(100,210,193,.15)}
     .conv-item-title{font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .conv-item-meta{font-size:11px;color:var(--muted);margin-top:2px;display:flex;gap:8px}
     .conv-item .status-dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0;margin-top:5px}
-    .status-dot.running{background:var(--accent);animation:pulse 1.2s infinite}
-    .status-dot.done{background:var(--ok)}
-    .status-dot.failed{background:var(--bad)}
-    .status-dot.queued{background:var(--accent-2)}
+    .status-dot.running{background:var(--accent-2);animation:pulse 1.2s infinite;box-shadow:0 0 6px rgba(100,210,193,.5)}
+    .status-dot.done{background:var(--ok);box-shadow:0 0 4px rgba(143,229,167,.3)}
+    .status-dot.failed{background:var(--bad);box-shadow:0 0 4px rgba(255,145,135,.3)}
+    .status-dot.queued{background:var(--accent);box-shadow:0 0 4px rgba(212,165,116,.3)}
     #newConvBtn{width:100%;height:36px;margin:8px;border:1px dashed var(--line);border-radius:8px;background:transparent;color:var(--muted);font-size:13px;cursor:pointer;font-weight:650}
     #newConvBtn:hover{border-color:var(--accent-2);color:var(--text)}
     main{padding:14px;overflow:auto;min-width:0;flex:1}
@@ -682,12 +701,12 @@ const html = `<!doctype html>
     select{width:100%;height:42px;border:1px solid var(--line);border-radius:8px;background:#111615;color:var(--text);padding:0 10px;font:inherit;min-width:0;max-width:100%;outline:none;text-overflow:ellipsis;transition:border-color .2s,box-shadow .2s}
     select:focus,textarea:focus{border-color:rgba(212,165,116,.5);box-shadow:0 0 0 3px rgba(212,165,116,.1),0 0 20px rgba(212,165,116,.05)}
     .thread{width:100%;max-width:880px;min-width:0;margin:0 auto;display:flex;flex-direction:column;gap:12px;padding-bottom:4px}
-    .msg{border-radius:12px;padding:14px 15px;line-height:1.65;white-space:pre-wrap;word-break:break-word;box-shadow:0 2px 12px rgba(0,0,0,.15);animation:msgIn .2s ease-out}
-    .msg.user{margin-left:auto;max-width:min(760px,92%);background:linear-gradient(135deg,rgba(212,165,116,.12),rgba(212,165,116,.06));border:1px solid rgba(212,165,116,.2);border-right:3px solid rgba(212,165,116,.5)}
-    .msg.assistant{margin-right:auto;max-width:min(820px,100%);background:linear-gradient(135deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.06);border-left:3px solid rgba(100,210,193,.35)}
-    @keyframes msgIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .msg{border-radius:14px;padding:14px 16px;line-height:1.65;white-space:pre-wrap;word-break:break-word;box-shadow:0 2px 16px rgba(0,0,0,.2);animation:msgIn .25s ease-out}
+    .msg.user{margin-left:auto;max-width:min(760px,92%);background:linear-gradient(135deg,rgba(212,165,116,.1),rgba(212,165,116,.04));border:1px solid rgba(212,165,116,.18);border-right:3px solid rgba(212,165,116,.45);box-shadow:0 2px 16px rgba(212,165,116,.06)}
+    .msg.assistant{margin-right:auto;max-width:min(820px,100%);background:linear-gradient(135deg,rgba(100,210,193,.05),rgba(100,210,193,.01));border:1px solid rgba(100,210,193,.08);border-left:3px solid rgba(100,210,193,.3);box-shadow:0 2px 16px rgba(100,210,193,.04)}
+    @keyframes msgIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
     .meta{font-size:12px;color:var(--muted);margin-bottom:4px}
-    .scroll-hint{position:sticky;bottom:6px;display:none;margin:8px auto 0;height:34px;min-width:100px;border:1px solid var(--accent-2);border-radius:999px;background:rgba(16,20,19,.92);color:var(--accent-2);font-size:13px;font-weight:650;cursor:pointer;backdrop-filter:blur(8px);box-shadow:0 4px 16px rgba(0,0,0,.3)}
+    .scroll-hint{position:sticky;bottom:6px;display:none;margin:8px auto 0;height:34px;min-width:100px;border:1px solid rgba(100,210,193,.4);border-radius:999px;background:rgba(16,20,19,.94);color:var(--accent-2);font-size:13px;font-weight:650;cursor:pointer;backdrop-filter:blur(12px);box-shadow:0 4px 20px rgba(0,0,0,.4),0 0 12px rgba(100,210,193,.1)}
     .scroll-hint.visible{display:block}
     .typing-dots{display:inline-flex;gap:3px;align-items:center}
     .typing-dots span{width:5px;height:5px;border-radius:50%;background:var(--muted);animation:dotPulse 1.2s infinite}
@@ -695,27 +714,53 @@ const html = `<!doctype html>
     .typing-dots span:nth-child(3){animation-delay:.4s}
     @keyframes dotPulse{0%,60%{opacity:.2}30%{opacity:1}}
     .tool-note{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
-    form{width:100%;min-width:0;z-index:2;padding:10px max(12px,env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right));border-top:1px solid rgba(255,255,255,.06);background:rgba(12,15,16,.92);backdrop-filter:blur(20px);box-shadow:0 -4px 24px rgba(0,0,0,.2)}
+    form{width:100%;min-width:0;z-index:2;padding:10px max(12px,env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right));border-top:1px solid rgba(255,255,255,.04);background:rgba(8,10,10,.88);backdrop-filter:blur(24px) saturate(120%);box-shadow:0 -8px 32px rgba(0,0,0,.3)}
     .bar{width:100%;max-width:880px;min-width:0;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
     textarea{width:100%;min-height:54px;max-height:160px;resize:none;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(17,22,21,.8);color:var(--text);padding:12px 14px;outline:none;font:inherit;line-height:1.45;transition:border-color .2s,box-shadow .2s;backdrop-filter:blur(4px)}
     .char-count{font-size:11px;color:var(--muted);text-align:right;grid-column:1 / -1;margin-top:2px}
-    button{height:56px;min-width:80px;border:0;border-radius:10px;background:var(--accent);color:#0d120f;font-weight:800;font:inherit;font-size:15px;cursor:pointer;transition:all .15s}
-    button:hover{filter:brightness(1.06);transform:translateY(-1px);box-shadow:0 4px 12px rgba(212,165,116,.25)}
-    button:active{transform:translateY(0) scale(.98)}
+    button{height:56px;min-width:80px;border:0;border-radius:10px;background:linear-gradient(135deg,var(--accent-2),var(--accent));color:#0a0f0e;font-weight:800;font:inherit;font-size:15px;cursor:pointer;transition:all .2s}
+    button:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 6px 20px rgba(100,210,193,.3)}
+    button:active{transform:translateY(0) scale(.97)}
     button:disabled{opacity:.4;transform:none;box-shadow:none;filter:none}
     button:disabled{opacity:.45}
     .paradigm-row{width:100%;max-width:880px;min-width:0;margin:0 auto 4px;display:flex;gap:6px;align-items:center}
     .paradigm-row select{width:auto;min-width:120px;max-width:45%;flex:0 1 auto;height:36px;font-size:14px;border-radius:999px;padding:0 12px}
     .chip{height:36px;min-width:0;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--muted);border-radius:999px;padding:0 12px;font-size:13px;white-space:nowrap;font-weight:650;cursor:pointer;transition:all .2s}
     .chip:hover{border-color:rgba(255,255,255,.15);color:var(--text)}
+    .chip.on{color:var(--accent-2);border-color:rgba(100,210,193,.4);background:rgba(100,210,193,.12);box-shadow:0 0 12px rgba(100,210,193,.15);animation:chipOn .3s ease-out}
+    @keyframes chipOn{0%{box-shadow:0 0 0 rgba(100,210,193,.4);background:rgba(100,210,193,.25)}100%{box-shadow:0 0 12px rgba(100,210,193,.15);background:rgba(100,210,193,.12)}}
     #singleTurnBtn.on{color:var(--accent);border-color:rgba(212,165,116,.5);background:rgba(212,165,116,.08)}
     .slot{height:36px;min-width:36px;border:1px dashed var(--line);background:transparent;color:var(--muted);border-radius:999px;padding:0 12px;font-size:13px;white-space:nowrap;font-weight:650;cursor:pointer;transition:all .2s}
     .slot:hover{border-color:rgba(255,255,255,.2);color:var(--text)}
     .slot.filled{border-style:solid;border-color:var(--line);background:rgba(255,255,255,.04)}
     .slot.active{border-color:rgba(100,210,193,.55);color:var(--accent-2);background:rgba(100,210,193,.1);box-shadow:0 0 12px rgba(100,210,193,.1)}
+    /* bottom tab bar */
+    .bottom-bar{position:sticky;bottom:0;z-index:5;display:flex;border-top:1px solid rgba(255,255,255,.05);background:rgba(12,15,16,.96);backdrop-filter:blur(16px);padding:4px max(12px,env(safe-area-inset-left)) max(4px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right))}
+    .bb-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;border:0;background:transparent;color:var(--muted);font-size:20px;cursor:pointer;transition:color .15s;-webkit-tap-highlight-color:transparent}
+    .bb-tab span{font-size:10px;font-weight:650}
+    .bb-tab.on{color:var(--accent-2)}
+    /* page panels */
+    .page-panel{display:none;flex:1;overflow:auto;padding:14px}
+    .page-panel.active{display:flex;flex-direction:column}
+    .page-title{font-size:16px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+    .page-content{flex:1;overflow:auto}
+    /* bills table */
+    .bills-table{width:100%;border-collapse:collapse;font-size:13px}
+    .bills-table th,.bills-table td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}
+    .bills-table th{color:var(--muted);font-weight:650;font-size:11px;text-transform:uppercase}
+    .bills-table tr:hover{background:rgba(255,255,255,.02)}
+    .stat-card{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:8px}
+    .stat-value{font-size:24px;font-weight:800;color:var(--accent-2)}
+    .stat-label{font-size:12px;color:var(--muted);margin-top:2px}
+    /* todo list */
+    .todo-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.03)}
+    .todo-check{width:20px;height:20px;border:2px solid var(--line);border-radius:6px;flex-shrink:0;cursor:pointer}
+    .todo-check.done{background:var(--ok);border-color:var(--ok)}
+    .todo-text{font-size:14px}
+    .todo-text.done{text-decoration:line-through;color:var(--muted)}
     @media (min-width: 960px){
       html,body{overflow:hidden}
-      .app{height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+      .app{height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto}
       main{padding:18px 20px}
       form{padding:12px 20px 16px}
     }
@@ -771,7 +816,7 @@ const html = `<!doctype html>
     <header>
       <div class="brand">
         <button id="convToggle" class="conv-toggle" type="button"><span class="arrow">☰</span> 对话</button>
-        <div class="mark">C</div><h1>Claude Notes</h1><span class="subtitle">手机笔记助理</span>
+        <div class="mark">C</div><h1>Claude Notes</h1>
       </div>
       <button class="cancel-btn" id="cancelBtn" type="button" title="取消任务">✕</button>
       <button id="modelBtn" class="model-btn" type="button" title="切换模型">Pro</button>
@@ -785,18 +830,51 @@ const html = `<!doctype html>
         <div class="conv-list" id="convList"></div>
         <button id="newConvBtn">+ 新对话</button>
       </aside>
-      <main><div class="thread" id="thread"><div class="empty-state"><div class="icon">💬</div><div class="text">选择对话或发送消息</div></div></div><button class="scroll-hint" id="scrollHint" type="button" aria-label="滚动到底部">↓ 新消息</button></main>
+      <main>
+        <!-- Chat page -->
+        <div class="page-panel active" id="page-chat">
+          <div class="thread" id="thread"><div class="empty-state"><div class="icon">💬</div><div class="text">选择对话或发送消息</div></div></div>
+          <button class="scroll-hint" id="scrollHint" type="button" aria-label="滚动到底部">↓ 新消息</button>
+        </div>
+        <!-- Bills page -->
+        <div class="page-panel" id="page-bills">
+          <div class="page-title" style="justify-content:space-between">
+            <span>💰 账单</span>
+            <span style="display:flex;align-items:center;gap:4px">
+              <button id="billPrev" class="chip" style="height:28px;font-size:11px;padding:0 8px">◀</button>
+              <span id="billMonth" style="font-size:14px;font-weight:700;min-width:80px;text-align:center"></span>
+              <button id="billNext" class="chip" style="height:28px;font-size:11px;padding:0 8px">▶</button>
+            </span>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap" id="billStats"></div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px" id="billPeriods"></div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px" id="billDayChips"></div>
+          <div class="page-content" id="billTable"></div>
+        </div>
+        <!-- Todos page -->
+        <div class="page-panel" id="page-todos">
+          <div class="page-title">✅ 待办 · <span id="todoDate"></span></div>
+          <div class="page-content" id="todoList"></div>
+        </div>
+      </main>
     </div>
     <form id="form">
       <div class="paradigm-row">
         <select id="paradigmSelect"></select>
         <button class="chip" id="singleTurnBtn" type="button">单轮</button>
+        <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,.csv" multiple style="display:none" />
+        <button class="chip" id="uploadBtn" type="button" title="上传文件">📎</button>
         <span style="flex:1"></span>
         <button class="slot" id="slot0" type="button" title="单击切换 · 双击绑定">+</button>
         <button class="slot" id="slot1" type="button" title="单击切换 · 双击绑定">+</button>
       </div>
       <div class="bar"><textarea id="input" placeholder="输入一句话" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false"></textarea><button id="send">发送</button><span class="char-count" id="charCount"></span></div>
     </form>
+    <nav class="bottom-bar" id="bottomBar">
+      <button class="bb-tab on" data-page="chat">💬<span>对话</span></button>
+      <button class="bb-tab" data-page="bills">💰<span>账单</span></button>
+      <button class="bb-tab" data-page="todos">✅<span>待办</span></button>
+    </nav>
   </div>
   <script>
     // ── DOM refs ──
@@ -988,6 +1066,8 @@ const html = `<!doctype html>
       if (!prompt) return;
       input.value = '';
       charCount.textContent = '';
+      const files = pendingFiles; pendingFiles = [];
+      uploadBtn.textContent = '📎'; uploadBtn.style.color = ''; uploadBtn.style.borderColor = '';
 
       // Create or reuse conversation
       if (singleTurn || !activeConvId || !findConv(activeConvId)) {
@@ -1012,7 +1092,7 @@ const html = `<!doctype html>
       try {
         const resp = await fetch('/api/chat/stream', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({message: prompt, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel}),
+          body: JSON.stringify({message: prompt, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel, files: files}),
           signal: (streamingAbort = new AbortController()).signal
         });
         if (!resp.ok) { const ed = await resp.json().catch(()=>({error:'HTTP '+resp.status})); throw new Error(ed.error||'请求失败'); }
@@ -1029,7 +1109,8 @@ const html = `<!doctype html>
             else if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));
-                if (eventType === 'text') { fullText += data.delta; bubble.appendText(data.delta); }
+                if (eventType === 'meta') { conv._jobId = data.jobId; saveConversations(); }
+                else if (eventType === 'text') { fullText += data.delta; bubble.appendText(data.delta); }
                 else if (eventType === 'done') { if (!fullText.trim()) bubble.setText(data.reply || '完成'); }
                 else if (eventType === 'error') { bubble.setText('失败：' + escapeHtml(data.message)); }
               } catch {}
@@ -1155,15 +1236,190 @@ const html = `<!doctype html>
       }
       saveConversations(); renderConvList(); toast('已删除');
     }
+    // ── Page tabs ──
+    let currentPage = 'chat';
+    const tabPages = { chat: showChatPage, bills: showBillsPage, todos: showTodosPage };
+    document.getElementById('bottomBar').addEventListener('click', e => {
+      const tab = e.target.closest('.bb-tab');
+      if (!tab || tab.dataset.page === currentPage) return;
+      document.querySelectorAll('.bb-tab').forEach(t => t.classList.remove('on'));
+      tab.classList.add('on');
+      currentPage = tab.dataset.page;
+      document.querySelectorAll('.page-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('page-' + currentPage).classList.add('active');
+      // Show/hide form for chat vs other pages
+      const isChat = currentPage === 'chat';
+      document.getElementById('form').style.display = isChat ? '' : 'none';
+      document.getElementById('bottomBar').style.display = '';
+      if (tabPages[currentPage]) tabPages[currentPage]();
+    });
+
+    function showChatPage() { scrollToBottom(); }
+    let billYear, billMonth, billCache = {};
+    async function loadBills(year, mon) {
+      const key = year + '-' + mon;
+      document.getElementById('billMonth').textContent = year + '年' + parseInt(mon) + '月';
+      document.getElementById('billPrev').style.visibility = '';
+      document.getElementById('billNext').style.visibility = '';
+      if (billCache[key]) { renderBills(billCache[key]); return; }
+      document.getElementById('billTable').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">加载中...</div>';
+      document.getElementById('billStats').innerHTML = '';
+      document.getElementById('billPeriods').innerHTML = ''; document.getElementById('billDayChips').innerHTML = '';
+      try {
+        const r = await fetch('/api/bills?month=' + key);
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || '加载失败');
+        billCache[key] = data;
+        renderBills(data);
+      } catch(e) { document.getElementById('billTable').innerHTML = '<div style="color:var(--bad);text-align:center;padding:40px">加载失败: ' + escapeHtml(e.message) + '</div>'; }
+    }
+    function renderBills(data) {
+      const rows = data.rows || [];
+      const headers = data.headers || ['日期','星期','类型','备注','金额','垫付'];
+      if (rows.length === 0) {
+        document.getElementById('billTable').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">本月暂无账单</div>';
+        document.getElementById('billPeriods').innerHTML = ''; document.getElementById('billDayChips').innerHTML = '';
+        return;
+      }
+      // Two-level filter: period → day
+      const periods = [
+        { key: 'early', label: '上旬', range: [1,10] },
+        { key: 'mid', label: '中旬', range: [11,20] },
+        { key: 'late', label: '下旬', range: [21,31] }
+      ];
+      const today = new Date().getDate();
+      const curPeriod = today <= 10 ? 'early' : today <= 20 ? 'mid' : 'late';
+      // Pre-calc
+      const byDay = {}, periodSums = { early:{sum:0}, mid:{sum:0}, late:{sum:0} };
+      rows.forEach(r => {
+        const day = parseInt((r[0]||'').slice(-2))||0;
+        const amt = parseFloat(r[4]||'0')||0;
+        if (!byDay[day]) byDay[day] = {sum:0,count:0};
+        byDay[day].sum += amt; byDay[day].count++;
+        if (day <= 10) periodSums.early.sum += amt;
+        else if (day <= 20) periodSums.mid.sum += amt;
+        else periodSums.late.sum += amt;
+      });
+      let selectedPeriod = curPeriod, selectedDay = 0; // 0 = whole period
+
+      function updateBillView() {
+        let filteredRows;
+        if (selectedDay > 0) {
+          filteredRows = rows.filter(r => parseInt((r[0]||'').slice(-2)) === selectedDay);
+        } else if (selectedPeriod === 'all') {
+          filteredRows = rows;
+        } else {
+          const p = periods.find(x => x.key === selectedPeriod);
+          filteredRows = rows.filter(r => { const d = parseInt((r[0]||'').slice(-2))||0; return d >= p.range[0] && d <= p.range[1]; });
+        }
+        let ft=0, fp=0;
+        filteredRows.forEach(r => { ft += parseFloat(r[4]||'0')||0; if ((r[5]||'')==='是') fp += parseFloat(r[4]||'0')||0; });
+        const label = selectedDay > 0 ? selectedDay+'日' : selectedPeriod==='all' ? '月' : (periods.find(x=>x.key===selectedPeriod)?.label||'');
+        document.getElementById('billStats').innerHTML =
+          '<div class="stat-card"><div class="stat-value">¥'+ft.toFixed(2)+'</div><div class="stat-label">'+label+'支出</div></div>'+
+          '<div class="stat-card"><div class="stat-value">¥'+fp.toFixed(2)+'</div><div class="stat-label">待报销</div></div>';
+        document.getElementById('billTable').innerHTML = '<table class="bills-table"><thead><tr>'+
+          headers.map(h=>'<th>'+escapeHtml(h)+'</th>').join('')+'</tr></thead><tbody>'+
+          filteredRows.map(r=>'<tr>'+r.map(c=>'<td>'+escapeHtml(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+        // Render period chips
+        document.getElementById('billPeriods').innerHTML = '<button class="chip period-chip'+(selectedPeriod==='all' && selectedDay===0?' on':'')+'" data-period="all" style="height:28px;font-size:11px">全部 ¥'+(periodSums.early.sum+periodSums.mid.sum+periodSums.late.sum).toFixed(0)+'</button>'+
+          periods.map(p=>'<button class="chip period-chip'+(selectedPeriod===p.key && selectedDay===0?' on':'')+'" data-period="'+p.key+'" style="height:28px;font-size:11px">'+p.label+' ¥'+periodSums[p.key].sum.toFixed(0)+'</button>').join('');
+        // Render day chips for selected period
+        let daysDiv = '';
+        if (selectedPeriod !== 'all' || selectedDay > 0) {
+          const p = periods.find(x=>x.key===selectedPeriod) || {range:[1,31]};
+          const days = Object.keys(byDay).map(Number).filter(d=>d>=p.range[0]&&d<=p.range[1]).sort((a,b)=>a-b);
+          daysDiv = days.map(d=>'<button class="chip day-chip'+(selectedDay===d?' on':'')+'" data-day="'+d+'" style="height:26px;font-size:11px">'+d+'日 ¥'+byDay[d].sum.toFixed(0)+'</button>').join('');
+        }
+        document.getElementById('billDayChips').innerHTML = daysDiv;
+      }
+
+      // Event delegation
+      document.getElementById('billPeriods').onclick = e => {
+        const btn = e.target.closest('.period-chip'); if (!btn) return;
+        selectedPeriod = btn.dataset.period; selectedDay = 0; updateBillView();
+      };
+      document.getElementById('billDayChips').onclick = e => {
+        const btn = e.target.closest('.day-chip'); if (!btn) return;
+        selectedDay = parseInt(btn.dataset.day); updateBillView();
+      };
+      updateBillView();
+    }
+    async function showBillsPage() {
+      const d = new Date();
+      if (!billYear) { billYear = d.getFullYear(); billMonth = String(d.getMonth()+1).padStart(2,'0'); }
+      loadBills(billYear, billMonth);
+    }
+    document.getElementById('billPrev').addEventListener('click', () => {
+      let m = parseInt(billMonth) - 1; let y = billYear;
+      if (m < 1) { m = 12; y--; }
+      billMonth = String(m).padStart(2,'0'); billYear = y;
+      loadBills(billYear, billMonth);
+    });
+    document.getElementById('billNext').addEventListener('click', () => {
+      let m = parseInt(billMonth) + 1; let y = billYear;
+      if (m > 12) { m = 1; y++; }
+      billMonth = String(m).padStart(2,'0'); billYear = y;
+      loadBills(billYear, billMonth);
+    });
+    async function showTodosPage() {
+      const d = new Date();
+      const ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      document.getElementById('todoDate').textContent = ds;
+      try {
+        const r = await fetch('/api/note/read?path=' + encodeURIComponent('900 Journals & Reviews/910 Daily Notes/' + ds + '.md'));
+        const data = await r.json();
+        if (!r.ok || !data.content) { document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">今日暂无日记<br><small>在对话中说"帮我记录今天要做的事"</small></div>'; return; }
+        const todos = data.content.split('\\n').filter(l => l.match(/^[-*] \[.\]/));
+        const pending = todos.filter(l => l.match(/^[-*] \[ \]/));
+        const done = todos.filter(l => l.match(/^[-*] \[x\]/i));
+        document.getElementById('todoList').innerHTML =
+          (pending.length ? '<div style="font-size:13px;color:var(--muted);margin-bottom:8px">⏳ 待完成 (' + pending.length + ')</div>' : '') +
+          pending.map(l => '<div class="todo-item"><div class="todo-check"></div><div class="todo-text">' + escapeHtml(l.replace(/^[-*] \[.\] /,'')) + '</div></div>').join('') +
+          (done.length ? '<div style="font-size:13px;color:var(--muted);margin:16px 0 8px">✅ 已完成 (' + done.length + ')</div>' : '') +
+          done.map(l => '<div class="todo-item"><div class="todo-check done"></div><div class="todo-text done">' + escapeHtml(l.replace(/^[-*] \[x\] /i,'')) + '</div></div>').join('');
+      } catch(e) { document.getElementById('todoList').innerHTML = '<div style="color:var(--bad);text-align:center;padding:40px">加载失败</div>'; }
+    }
+
+    // ── File upload ──
+    let pendingFiles = [];
+    const fileInput = document.getElementById('fileInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+      for (const f of fileInput.files) {
+        const reader = new FileReader();
+        await new Promise(resolve => {
+          reader.onload = () => {
+            const isImage = f.type.startsWith('image/');
+            pendingFiles.push({ name: f.name, type: f.type, data: reader.result, isImage });
+            resolve();
+          };
+          if (f.type.startsWith('image/')) reader.readAsDataURL(f);
+          else reader.readAsText(f);
+        });
+      }
+      fileInput.value = '';
+      if (pendingFiles.length) {
+        uploadBtn.textContent = '📎' + pendingFiles.length;
+        uploadBtn.style.color = 'var(--accent-2)';
+        uploadBtn.style.borderColor = 'rgba(100,210,193,.4)';
+        toast('已添加 ' + pendingFiles.length + ' 个文件，发送消息时附带');
+      }
+    });
+
+    // ── Single turn ──
     singleTurnBtn.addEventListener('click', () => {
       singleTurn = !singleTurn;
       singleTurnBtn.classList.toggle('on', singleTurn);
+      try { localStorage.setItem('claudenotes_singleTurn', singleTurn ? '1' : '0'); } catch {}
       toast(singleTurn ? '单轮模式：每次新建对话' : '连续模式：在同一对话中继续');
     });
     modelBtn.addEventListener('click', () => {
       const idx = availableModels.indexOf(currentModel);
       currentModel = availableModels[(idx + 1) % availableModels.length] || currentModel;
       modelBtn.textContent = currentModel.includes('flash') ? 'Flash' : 'Pro';
+      try { localStorage.setItem('claudenotes_model', currentModel); } catch {}
     });
 
     // ── Clear history ──
@@ -1185,7 +1441,9 @@ const html = `<!doctype html>
     async function loadConfig() {
       const r = await fetch('/api/config'); const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      availableModels = d.models; currentModel = d.defaultModel;
+      availableModels = d.models;
+      const saved = (() => { try { return localStorage.getItem('claudenotes_model'); } catch { return null; } })();
+      currentModel = (saved && d.models.includes(saved)) ? saved : d.defaultModel;
       modelBtn.textContent = currentModel.includes('flash') ? 'Flash' : 'Pro';
     }
     async function loadParadigms() {
@@ -1198,24 +1456,79 @@ const html = `<!doctype html>
         if (dr.ok) paradigmCache[d.tasks[0].path] = dd.content || '';
       }
       slotParadigms.forEach(s => { if (s && s.content) paradigmCache[s.path] = s.content; });
+      // Restore saved paradigm selection
+      try {
+        const savedParadigm = localStorage.getItem('claudenotes_paradigm');
+        if (savedParadigm && paradigmSelect.querySelector('option[value="' + savedParadigm.replace(/"/g,'&quot;') + '"]')) {
+          paradigmSelect.value = savedParadigm;
+          if (paradigmCache[savedParadigm] === undefined) {
+            const dr = await fetch('/api/task?path=' + encodeURIComponent(savedParadigm));
+            const dd = await dr.json();
+            if (dr.ok) paradigmCache[savedParadigm] = dd.content || '';
+          }
+        }
+      } catch {}
       updateSlotUI();
     }
     paradigmSelect.addEventListener('change', async () => {
       updateSlotUI();
       const path = paradigmSelect.value;
+      try { localStorage.setItem('claudenotes_paradigm', path); } catch {}
       if (!path || paradigmCache[path]) return;
       try { const r = await fetch('/api/task?path=' + encodeURIComponent(path)); const d = await r.json(); if (r.ok) paradigmCache[path] = d.content||''; } catch {}
     });
 
+    // ── Recovery: poll for missed job results after disconnect ──
+    async function recoverMissedJobs() {
+      let recovered = false;
+      const running = conversations.filter(c => c.status === 'running' && c._jobId);
+      if (!running.length) return recovered;
+      try {
+        const r = await fetch('/api/jobs'); const d = await r.json();
+        if (!r.ok) return false;
+        for (const conv of running) {
+          const job = d.jobs.find(j => j.id === conv._jobId);
+          if (job && (job.status === 'done' || job.status === 'failed')) {
+            conv.status = job.status;
+            conv.updatedAt = nowStr();
+            if (job.status === 'done' && job.reply) {
+              conv.messages.push({role: 'assistant', content: job.reply, time: job.finishedAt?.split(' ')[1] || nowStr()});
+            } else if (job.status === 'failed') {
+              conv.messages.push({role: 'assistant', content: '失败：' + (job.error || '未知错误'), time: nowStr()});
+            }
+            recovered = true;
+          }
+        }
+      } catch {}
+      return recovered;
+    }
+
+    // ── Restore button states ──
+    try {
+      if (localStorage.getItem('claudenotes_singleTurn') === '1') {
+        singleTurn = true; singleTurnBtn.classList.add('on');
+      }
+    } catch {}
+
     // ── Init ──
     state.textContent = '加载中...';
+    // Show saved model immediately (will be confirmed by loadConfig)
+    try {
+      const sm = localStorage.getItem('claudenotes_model');
+      if (sm) { currentModel = sm; modelBtn.textContent = sm.includes('flash') ? 'Flash' : 'Pro'; }
+    } catch {}
     loadConversations();
     renderConvList();
     if (conversations.length > 0) {
       activeConvId = conversations[0].id;
       renderMessages(conversations[0]);
     }
-    Promise.all([loadConfig(), loadParadigms()]).then(() => { state.textContent = 'ready'; }).catch(err => { state.textContent = 'error'; state.dataset.status = 'error'; });
+    Promise.all([loadConfig(), loadParadigms(), recoverMissedJobs()]).then(() => {
+      saveConversations(); renderConvList();
+      if (activeConvId && findConv(activeConvId)) renderMessages(findConv(activeConvId));
+      updateSlotUI();
+      state.textContent = 'ready';
+    }).catch(err => { state.textContent = 'error'; state.dataset.status = 'error'; });
   </script>
 </body>
 </html>`;
@@ -1266,7 +1579,24 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (!body.message) throw new Error('message is required');
       const task = body.taskPath ? { path: body.taskPath, content: body.taskContent || '' } : null;
-      const jobRef = { _aborted: false, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
+      // Create persistent job so client can recover if disconnected
+      const now = appNow();
+      const job = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        status: 'running',
+        message: body.message,
+        task,
+        model: normalizeModel(body.model),
+        reply: '',
+        error: '',
+        createdAt: `${now.date} ${now.time}`,
+        startedAt: `${now.date} ${now.time}`,
+        finishedAt: '',
+        _aborted: false,
+      };
+      jobs.unshift(job);
+      trimJobs();
+      const jobRef = job;
 
       res.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -1279,9 +1609,20 @@ const server = http.createServer(async (req, res) => {
       req.on('close', () => { jobRef._aborted = true; });
 
       try {
-        await runClaudeStreaming(body.message, task, body.model, res, jobRef, body.history);
+        await runClaudeStreaming(body.message, task, body.model, res, jobRef, body.history, body.files);
+        if (!jobRef._aborted) {
+          jobRef.status = 'done';
+          const finished = appNow();
+          jobRef.finishedAt = `${finished.date} ${finished.time}`;
+        }
       } catch (err) {
-        if (!jobRef._aborted) sseWrite(res, 'error', { message: err.message || String(err) });
+        if (!jobRef._aborted) {
+          jobRef.status = 'failed';
+          jobRef.error = err.message || String(err);
+          const finished = appNow();
+          jobRef.finishedAt = `${finished.date} ${finished.time}`;
+          sseWrite(res, 'error', { message: err.message || String(err) });
+        }
       }
       res.end();
       return;
@@ -1290,7 +1631,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (!body.message) throw new Error('message is required');
       const task = body.taskPath ? { path: body.taskPath, content: body.taskContent || '' } : null;
-      const job = enqueueJob({ message: body.message, task, model: body.model, history: body.history });
+      const job = enqueueJob({ message: body.message, task, model: body.model, history: body.history, files: body.files });
       json(res, 202, { job: serializeJob(job) });
       return;
     }
@@ -1299,12 +1640,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (url.pathname === '/api/job/cancel' && req.method === 'POST') {
-      const target = activeJob || [...jobs].reverse().find((item) => item.status === 'queued');
+      const target = activeJob
+        || [...jobs].reverse().find((item) => item.status === 'queued')
+        || [...jobs].reverse().find((item) => item.status === 'running' && !item._aborted);
       if (target && (target.status === 'running' || target.status === 'queued')) {
         target._aborted = true;
         target.status = 'cancelled';
         target.error = '用户取消';
-        target.finishedAt = appNow().date + ' ' + appNow().time;
+        const finished = appNow();
+        target.finishedAt = `${finished.date} ${finished.time}`;
         if (target === activeJob) activeJob = null;
         processQueue();
         json(res, 200, { ok: true, id: target.id });
@@ -1360,6 +1704,40 @@ const server = http.createServer(async (req, res) => {
         tasks = [{ path: defaultPath, name: '默认范式' }];
       }
       json(res, 200, { prefix: TASKS_PREFIX, tasks });
+      return;
+    }
+    if (url.pathname === '/api/bills' && req.method === 'GET') {
+      const month = url.searchParams.get('month') || '';
+      if (!month.match(/^\d{4}-\d{2}$/)) throw new Error('invalid month format (YYYY-MM)');
+      const [year, mon] = month.split('-');
+      const monStr = parseInt(mon, 10) + '月'; // "06" -> "6月"
+      const prefix = `900 Journals & Reviews/950 Bills/${year}/${monStr}/`;
+      // List all files in the month folder
+      const listData = unwrap(await fnsRequest('/api/notes', { params: { vault: DEFAULT_VAULT, keyword: monStr, searchContent: false } }));
+      const list = Array.isArray(listData) ? listData : (listData?.list || []);
+      const files = list.filter(n => String(n.path||'').startsWith(prefix));
+      // Read all daily files and extract table rows
+      const allRows = [];
+      let headers = ['日期','星期','类型','备注','金额','垫付'];
+      for (const f of files) {
+        try {
+          const noteData = unwrap(await fnsRequest('/api/note', { params: { vault: DEFAULT_VAULT, path: f.path } }));
+          const content = noteData?.content || '';
+          const lines = content.split('\n').filter(l => l.includes('|') && !l.includes('---'));
+          for (const line of lines) {
+            const cols = line.split('|').map(c => c.trim()).filter(Boolean);
+            if (cols.length >= 5 && !cols[0].includes('日期')) allRows.push(cols);
+          }
+        } catch {}
+      }
+      json(res, 200, { month, headers, rows: allRows, fileCount: files.length });
+      return;
+    }
+    if (url.pathname === '/api/note/read' && req.method === 'GET') {
+      const path = url.searchParams.get('path');
+      if (!path) throw new Error('path is required');
+      const data = unwrap(await fnsRequest('/api/note', { params: { vault: DEFAULT_VAULT, path } }));
+      json(res, 200, { path, content: data?.content || '' });
       return;
     }
     if (url.pathname === '/api/task' && req.method === 'GET') {
