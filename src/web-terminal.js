@@ -3,6 +3,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { URL } = require('url');
 const Anthropic = require('@anthropic-ai/sdk').default;
+const XLSX = require('xlsx');
 
 // ── Config from env ──────────────────────────────────────────────
 const HOST = process.env.WEB_TERMINAL_HOST || '0.0.0.0';
@@ -218,7 +219,10 @@ function json(res, code, data) {
 async function readBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
-  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+  const raw = Buffer.concat(chunks).toString('utf8') || '{}';
+  try { return JSON.parse(raw); } catch (e) {
+    throw new Error('请求数据格式错误，附件可能太大');
+  }
 }
 
 async function fnsRequest(path, { method = 'GET', params, body } = {}) {
@@ -350,6 +354,19 @@ function normalizeModel(model) {
 
 // ── Run Claude with tool-use loop (non-streaming) ────────────────
 
+function parseExcelBase64(b64) {
+  try {
+    const buf = Buffer.from(b64, 'base64');
+    const wb = XLSX.read(buf, { type: 'buffer' });
+    // Convert all sheets to text
+    return wb.SheetNames.map(name => {
+      const ws = wb.Sheets[name];
+      const csv = XLSX.utils.sheet_to_csv(ws, { blankrows: false });
+      return '=== Sheet: ' + name + ' ===\n' + csv;
+    }).join('\n\n');
+  } catch (e) { return '[Excel 解析失败: ' + e.message + ']'; }
+}
+
 function buildUserContent(userText, files) {
   if (!files || !files.length) return userText;
   const content = [{ type: 'text', text: userText }];
@@ -358,7 +375,16 @@ function buildUserContent(userText, files) {
       const [mime, b64] = f.data.split(',');
       content.push({ type: 'image', source: { type: 'base64', media_type: f.type || 'image/png', data: b64 || f.data } });
     } else if (f.data) {
-      content.push({ type: 'text', text: '\n=== ' + f.name + ' ===\n' + f.data });
+      const isExcel = /\.xlsx?$/i.test(f.name) || f.type.includes('spreadsheet') || f.type.includes('excel');
+      let text;
+      if (isExcel && f.data.includes('base64,')) {
+        text = parseExcelBase64(f.data.split('base64,')[1] || f.data);
+      } else if (isExcel) {
+        text = parseExcelBase64(f.data);
+      } else {
+        text = f.data;
+      }
+      content.push({ type: 'text', text: '\n=== ' + f.name + ' ===\n' + text });
     }
   }
   return content;
@@ -377,6 +403,7 @@ async function runClaude(userText, task, model, jobRef, history, files) {
 
   while (rounds < MAX_TOOL_ROUNDS) {
     if (jobRef && jobRef._aborted) throw new Error('任务已取消');
+    if (jobRef) jobRef._disconnected = jobRef._disconnected || false;
     rounds++;
 
     const response = await anthropic.messages.create({
@@ -423,7 +450,7 @@ async function runClaude(userText, task, model, jobRef, history, files) {
 // ── SSE helpers ──────────────────────────────────────────────────
 
 function sseWrite(res, event, data) {
-  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
 // ── Run Claude with streaming ────────────────────────────────────
@@ -440,6 +467,7 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history, f
 
   while (rounds < MAX_TOOL_ROUNDS) {
     if (jobRef && jobRef._aborted) throw new Error('任务已取消');
+    if (jobRef) jobRef._disconnected = jobRef._disconnected || false;
     rounds++;
 
     const stream = await anthropic.messages.create({
@@ -668,7 +696,6 @@ const html = `<!doctype html>
     .model-btn:hover{border-color:var(--accent-2);color:var(--text)}
     .trash-btn{height:28px;min-width:28px;border:0;background:transparent;color:var(--muted);font-size:14px;cursor:pointer;padding:0;border-radius:6px;display:flex;align-items:center;justify-content:center}
     .trash-btn:hover{color:var(--bad)}
-    .trash-btn.confirm{color:var(--bad);animation:pulse .5s ease-in-out infinite}
     .state{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:7px 10px;white-space:nowrap;background:rgba(255,255,255,.03);transition:all .3s}
     .cancel-btn{display:none;height:30px;width:30px;min-width:30px;border:1px solid var(--bad);border-radius:50%;background:transparent;color:var(--bad);font-size:14px;cursor:pointer;padding:0;line-height:1}
     .cancel-btn.visible{display:inline-flex;align-items:center;justify-content:center}
@@ -862,7 +889,7 @@ const html = `<!doctype html>
       <div class="paradigm-row">
         <select id="paradigmSelect"></select>
         <button class="chip" id="singleTurnBtn" type="button">单轮</button>
-        <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,.csv" multiple style="display:none" />
+        <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,.csv,.xls,.xlsx,.doc,.docx" multiple style="display:none" />
         <button class="chip" id="uploadBtn" type="button" title="上传文件">📎</button>
         <span style="flex:1"></span>
         <button class="slot" id="slot0" type="button" title="单击切换 · 双击绑定">+</button>
@@ -1076,9 +1103,10 @@ const html = `<!doctype html>
         activeConvId = conv.id;
       }
       const conv = findConv(activeConvId);
-      conv.title = conv.messages.length === 0 ? (conv.title.split(' ').slice(0,1).join(' ') + ' ' + prompt.slice(0, 45)) : conv.title;
+      conv.title = conv.messages.length === 0 ? (conv.title.split(' ').slice(0,1).join(' ') + ' ' + (prompt + (files.length > 0 ? ' 📎' + files.length : '')).slice(0, 45)) : conv.title;
       conv.status = 'running';
-      conv.messages.push({role: 'user', content: prompt, time: nowStr()});
+      const userContent = files.length > 0 ? prompt + '\\n\\n📎 ' + files.map(f=>f.name).join(', ') : prompt;
+      conv.messages.push({role: 'user', content: userContent, time: nowStr()});
       saveConversations();
       renderConvList();
       renderMessages(conv);
@@ -1092,7 +1120,7 @@ const html = `<!doctype html>
       try {
         const resp = await fetch('/api/chat/stream', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({message: prompt, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel, files: files}),
+          body: JSON.stringify({message: prompt, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel, history: singleTurn ? [] : (conv.messages || []).slice(-20), files: files}),
           signal: (streamingAbort = new AbortController()).signal
         });
         if (!resp.ok) { const ed = await resp.json().catch(()=>({error:'HTTP '+resp.status})); throw new Error(ed.error||'请求失败'); }
@@ -1383,10 +1411,12 @@ const html = `<!doctype html>
 
     // ── File upload ──
     let pendingFiles = [];
+    let filesLoading = false;
     const fileInput = document.getElementById('fileInput');
     const uploadBtn = document.getElementById('uploadBtn');
     uploadBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', async () => {
+      filesLoading = true; uploadBtn.textContent = '⏳';
       for (const f of fileInput.files) {
         const reader = new FileReader();
         await new Promise(resolve => {
@@ -1395,16 +1425,19 @@ const html = `<!doctype html>
             pendingFiles.push({ name: f.name, type: f.type, data: reader.result, isImage });
             resolve();
           };
-          if (f.type.startsWith('image/')) reader.readAsDataURL(f);
+          reader.onerror = () => resolve(); // skip on error
+          const isBinary = f.type.startsWith('image/') || /\.xlsx?$/i.test(f.name) || f.type.includes('spreadsheet') || f.type.includes('excel');
+          if (isBinary) reader.readAsDataURL(f);
           else reader.readAsText(f);
         });
       }
-      fileInput.value = '';
+      filesLoading = false; fileInput.value = '';
       if (pendingFiles.length) {
         uploadBtn.textContent = '📎' + pendingFiles.length;
         uploadBtn.style.color = 'var(--accent-2)';
         uploadBtn.style.borderColor = 'rgba(100,210,193,.4)';
-        toast('已添加 ' + pendingFiles.length + ' 个文件，发送消息时附带');
+      } else {
+        uploadBtn.textContent = '📎'; toast('未能读取文件');
       }
     });
 
@@ -1423,18 +1456,17 @@ const html = `<!doctype html>
     });
 
     // ── Clear history ──
-    let clearPending = false, clearTimer = null;
-    clearHistory.addEventListener('click', async () => {
-      if (!clearPending) {
-        clearPending = true; clearHistory.classList.add('confirm');
-        clearTimer = setTimeout(() => { clearPending = false; clearHistory.classList.remove('confirm'); }, 3000);
-        return;
-      }
-      clearTimeout(clearTimer); clearPending = false; clearHistory.classList.remove('confirm');
-      conversations = []; activeConvId = null;
+    clearHistory.addEventListener('click', () => {
+      if (!confirm('确定清除所有对话记录？此操作不可撤销。')) return;
+      conversations.length = 0; activeConvId = null;
+      localStorage.removeItem('claudenotes_convs');
+      localStorage.removeItem('claudenotes_model');
+      localStorage.removeItem('claudenotes_singleTurn');
+      localStorage.removeItem('claudenotes_paradigm');
       saveConversations(); renderConvList();
       thread.innerHTML = '<div class="empty-state"><div class="icon">🗑</div><div class="text">所有记录已清除</div></div>';
-      try { await fetch('/api/jobs/clear', {method:'POST'}); } catch {}
+      fetch('/api/jobs/clear', {method:'POST'}).catch(()=>{});
+      toast('已清除所有记录');
     });
 
     // ── Config & Paradigms ──
@@ -1480,27 +1512,25 @@ const html = `<!doctype html>
 
     // ── Recovery: poll for missed job results after disconnect ──
     async function recoverMissedJobs() {
-      let recovered = false;
       const running = conversations.filter(c => c.status === 'running' && c._jobId);
-      if (!running.length) return recovered;
+      if (!running.length) return;
       try {
         const r = await fetch('/api/jobs'); const d = await r.json();
-        if (!r.ok) return false;
+        if (!r.ok) throw new Error('jobs fetch failed');
         for (const conv of running) {
           const job = d.jobs.find(j => j.id === conv._jobId);
-          if (job && (job.status === 'done' || job.status === 'failed')) {
+          if (!job) { conv.status = 'done'; conv.messages.push({role:'assistant',content:'[响应丢失 — 请重新发送]',time:nowStr()}); continue; }
+          if (job.status === 'done' || job.status === 'failed') {
             conv.status = job.status;
             conv.updatedAt = nowStr();
-            if (job.status === 'done' && job.reply) {
-              conv.messages.push({role: 'assistant', content: job.reply, time: job.finishedAt?.split(' ')[1] || nowStr()});
-            } else if (job.status === 'failed') {
-              conv.messages.push({role: 'assistant', content: '失败：' + (job.error || '未知错误'), time: nowStr()});
-            }
-            recovered = true;
+            if (job.status === 'done' && job.reply) conv.messages.push({role:'assistant',content:job.reply,time:job.finishedAt?.split(' ')[1]||nowStr()});
+            else if (job.status === 'failed') conv.messages.push({role:'assistant',content:'失败：'+(job.error||'未知错误'),time:nowStr()});
           }
         }
-      } catch {}
-      return recovered;
+      } catch {
+        // If jobs API fails, mark all running as lost
+        for (const conv of running) { conv.status = 'done'; conv.messages.push({role:'assistant',content:'[响应丢失 — 请重新发送]',time:nowStr()}); }
+      }
     }
 
     // ── Restore button states ──
@@ -1509,6 +1539,30 @@ const html = `<!doctype html>
         singleTurn = true; singleTurnBtn.classList.add('on');
       }
     } catch {}
+
+    // ── Poll running conversations for progress ──
+    setInterval(async () => {
+      const running = conversations.filter(c => c.status === 'running' && c._jobId);
+      if (!running.length) return;
+      try {
+        const r = await fetch('/api/jobs'); const d = await r.json();
+        for (const conv of running) {
+          const job = d.jobs.find(j => j.id === conv._jobId);
+          if (!job) continue;
+          if (job.status === 'done' && job.reply) {
+            conv.messages.push({role:'assistant',content:job.reply,time:nowStr()});
+            conv.status = 'done'; conv.updatedAt = nowStr();
+            saveConversations(); renderConvList();
+            if (conv.id === activeConvId) renderMessages(conv);
+          } else if (job.status === 'failed') {
+            conv.messages.push({role:'assistant',content:'失败：'+(job.error||'未知错误'),time:nowStr()});
+            conv.status = 'failed'; conv.updatedAt = nowStr();
+            saveConversations(); renderConvList();
+            if (conv.id === activeConvId) renderMessages(conv);
+          }
+        }
+      } catch {}
+    }, 2000);
 
     // ── Init ──
     state.textContent = '加载中...';
@@ -1606,15 +1660,13 @@ const server = http.createServer(async (req, res) => {
       });
       sseWrite(res, 'meta', { jobId: jobRef.id, model: normalizeModel(body.model) });
 
-      req.on('close', () => { jobRef._aborted = true; });
+      req.on('close', () => { jobRef._disconnected = true; });
 
       try {
         await runClaudeStreaming(body.message, task, body.model, res, jobRef, body.history, body.files);
-        if (!jobRef._aborted) {
-          jobRef.status = 'done';
-          const finished = appNow();
-          jobRef.finishedAt = `${finished.date} ${finished.time}`;
-        }
+        jobRef.status = 'done';
+        const finished = appNow();
+        jobRef.finishedAt = `${finished.date} ${finished.time}`;
       } catch (err) {
         if (!jobRef._aborted) {
           jobRef.status = 'failed';
