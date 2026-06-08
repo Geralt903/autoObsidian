@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { URL } = require('url');
 const Anthropic = require('@anthropic-ai/sdk').default;
 const XLSX = require('xlsx');
@@ -23,8 +25,10 @@ const CLAUDE_MODELS = (process.env.ANTHROPIC_MODELS || DEFAULT_CLAUDE_MODEL)
   .map((m) => m.trim())
   .filter(Boolean);
 const CLAUDE_TIMEOUT_MS = parseInt(process.env.CLAUDE_TIMEOUT_MS || '180000', 10);
-const MAX_TOOL_ROUNDS = parseInt(process.env.CLAUDE_MAX_TOOL_ROUNDS || '5', 10);
+const MAX_TOOL_ROUNDS = parseInt(process.env.CLAUDE_MAX_TOOL_ROUNDS || '100', 10);
 const JOB_HISTORY_LIMIT = parseInt(process.env.JOB_HISTORY_LIMIT || '20', 10);
+const JOB_LOG_PATH = process.env.JOB_LOG_PATH || path.join(__dirname, 'job-events.log');
+const JOB_LOG_MAX_BYTES = parseInt(process.env.JOB_LOG_MAX_BYTES || '5242880', 10);
 
 // ── Auth config ──────────────────────────────────────────────────
 const PASSWORD_HASH = process.env.WEB_ACCESS_PASSWORD_HASH || '';
@@ -225,6 +229,53 @@ async function readBody(req) {
   }
 }
 
+function truncateForLog(value, limit = 500) {
+  if (value === undefined || value === null) return value;
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  return text.length > limit ? text.slice(0, limit) + `...<${text.length - limit} more>` : text;
+}
+
+function appendJobLog(job, event, data = {}) {
+  try {
+    if (fs.existsSync(JOB_LOG_PATH) && fs.statSync(JOB_LOG_PATH).size > JOB_LOG_MAX_BYTES) {
+      fs.renameSync(JOB_LOG_PATH, JOB_LOG_PATH + '.1');
+    }
+    const now = appNow();
+    const line = JSON.stringify({
+      ts: `${now.date} ${now.time}`,
+      event,
+      jobId: job?.id || data.jobId || '',
+      status: job?.status || data.status || '',
+      stage: job?.stage || data.stage || '',
+      round: job?.round || data.round || 0,
+      toolName: job?.toolName || data.toolName || '',
+      progressText: truncateForLog(job?.progressText || data.progressText || '', 300),
+      details: truncateForLog(job?.progressDetails || data.details || '', 500),
+      error: truncateForLog(job?.error || data.error || '', 500),
+      message: truncateForLog(job?.message || data.message || '', 500),
+      extra: data.extra ? truncateForLog(data.extra, 1000) : undefined,
+    });
+    fs.appendFile(JOB_LOG_PATH, line + '\n', () => {});
+  } catch {}
+}
+
+function readJobLogs({ id = '', limit = 200 } = {}) {
+  try {
+    const raw = fs.readFileSync(JOB_LOG_PATH, 'utf8');
+    const lines = raw.trim().split('\n').filter(Boolean).slice(-Math.max(limit * 4, limit));
+    const logs = [];
+    for (const line of lines) {
+      try {
+        const item = JSON.parse(line);
+        if (!id || item.jobId === id) logs.push(item);
+      } catch {}
+    }
+    return logs.slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
 async function fnsRequest(path, { method = 'GET', params, body } = {}) {
   if (!FNS_TOKEN) throw new Error('FNS_TOKEN is required');
   const url = new URL(FNS_BASE_URL + path);
@@ -270,6 +321,84 @@ function appNow() {
     time: `${map.hour}:${map.minute}:${map.second}`,
     timeZone: APP_TIME_ZONE,
   };
+}
+
+function addDateDays(dateStr, days) {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function monthKeysBetween(startDate, endDate) {
+  const out = [];
+  const d = new Date(`${startDate.slice(0, 7)}-01T12:00:00Z`);
+  const endKey = endDate.slice(0, 7);
+  while (true) {
+    const key = d.toISOString().slice(0, 7);
+    out.push(key);
+    if (key === endKey) break;
+    d.setUTCMonth(d.getUTCMonth() + 1);
+  }
+  return out;
+}
+
+function parseFrontmatter(content) {
+  const match = String(content || '').match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return {};
+  const data = {};
+  for (const line of match[1].split('\n')) {
+    const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!m) continue;
+    let value = m[2].trim();
+    value = value.replace(/^["']|["']$/g, '');
+    if (value === 'true') value = true;
+    else if (value === 'false') value = false;
+    else if (value === 'null') value = null;
+    data[m[1]] = value;
+  }
+  return data;
+}
+
+function setJobProgress(job, stage, progressText, extra = {}) {
+  if (!job) return null;
+  const now = appNow();
+  const progressUpdatedAt = `${now.date} ${now.time}`;
+  job.stage = stage;
+  job.progressText = progressText;
+  job.progressUpdatedAt = progressUpdatedAt;
+  if (Object.prototype.hasOwnProperty.call(extra, 'toolName')) job.toolName = extra.toolName || '';
+  if (Object.prototype.hasOwnProperty.call(extra, 'round')) job.round = extra.round || 0;
+  if (Object.prototype.hasOwnProperty.call(extra, 'details')) job.progressDetails = extra.details || '';
+  if (!Array.isArray(job.progressLog)) job.progressLog = [];
+  const entry = {
+    time: progressUpdatedAt,
+    stage,
+    text: progressText,
+    toolName: job.toolName || '',
+    details: job.progressDetails || '',
+    round: job.round || 0,
+  };
+  const last = job.progressLog[job.progressLog.length - 1];
+  if (!last || last.stage !== entry.stage || last.text !== entry.text || last.toolName !== entry.toolName || last.details !== entry.details) {
+    job.progressLog.push(entry);
+    if (job.progressLog.length > 80) job.progressLog = job.progressLog.slice(-80);
+    appendJobLog(job, 'progress', { details: entry.details, round: entry.round, toolName: entry.toolName });
+  }
+  return {
+    stage: job.stage,
+    progressText: job.progressText,
+    progressUpdatedAt: job.progressUpdatedAt,
+    toolName: job.toolName || '',
+    details: job.progressDetails || '',
+    round: job.round || 0,
+    progressLog: job.progressLog || [],
+  };
+}
+
+function emitJobProgress(res, job, stage, progressText, extra = {}) {
+  const payload = setJobProgress(job, stage, progressText, extra);
+  if (payload && res) sseWrite(res, 'progress', payload);
+  return payload;
 }
 
 // ── System prompt builder ────────────────────────────────────────
@@ -352,42 +481,96 @@ function normalizeModel(model) {
   return CLAUDE_MODELS.includes(model) ? model : DEFAULT_CLAUDE_MODEL;
 }
 
-// ── Run Claude with tool-use loop (non-streaming) ────────────────
-
-function parseExcelBase64(b64) {
-  try {
-    const buf = Buffer.from(b64, 'base64');
-    const wb = XLSX.read(buf, { type: 'buffer' });
-    // Convert all sheets to text
-    return wb.SheetNames.map(name => {
-      const ws = wb.Sheets[name];
-      const csv = XLSX.utils.sheet_to_csv(ws, { blankrows: false });
-      return '=== Sheet: ' + name + ' ===\n' + csv;
-    }).join('\n\n');
-  } catch (e) { return '[Excel 解析失败: ' + e.message + ']'; }
+function summarizeToolInput(input) {
+  if (!input || typeof input !== 'object') return '';
+  const parts = [];
+  if (input.vault) parts.push(`vault=${input.vault}`);
+  if (input.keyword) parts.push(`keyword=${input.keyword}`);
+  if (input.prefix) parts.push(`prefix=${input.prefix}`);
+  if (input.path) parts.push(`path=${input.path}`);
+  if (input.old) parts.push(`old=${String(input.old).slice(0, 60)}`);
+  if (input.new) parts.push(`new=${String(input.new).slice(0, 60)}`);
+  if (input.content) parts.push(`content=${String(input.content).slice(0, 80)}${String(input.content).length > 80 ? '...' : ''}`);
+  return parts.join(' · ');
 }
+
+// ── Run Claude with tool-use loop (non-streaming) ────────────────
 
 function buildUserContent(userText, files) {
   if (!files || !files.length) return userText;
+  // Non-image file content is already in userText (client-side concatenation)
+  // Only handle images here
   const content = [{ type: 'text', text: userText }];
   for (const f of files) {
     if (f.isImage && f.data) {
-      const [mime, b64] = f.data.split(',');
-      content.push({ type: 'image', source: { type: 'base64', media_type: f.type || 'image/png', data: b64 || f.data } });
-    } else if (f.data) {
-      const isExcel = /\.xlsx?$/i.test(f.name) || f.type.includes('spreadsheet') || f.type.includes('excel');
-      let text;
-      if (isExcel && f.data.includes('base64,')) {
-        text = parseExcelBase64(f.data.split('base64,')[1] || f.data);
-      } else if (isExcel) {
-        text = parseExcelBase64(f.data);
-      } else {
-        text = f.data;
-      }
-      content.push({ type: 'text', text: '\n=== ' + f.name + ' ===\n' + text });
+      const parts = f.data.split(',');
+      const b64 = parts.length > 1 ? parts[1] : parts[0];
+      content.push({ type: 'image', source: { type: 'base64', media_type: f.type || 'image/png', data: b64 } });
     }
   }
   return content;
+}
+
+function hasMessageOrFiles(body) {
+  return Boolean(String(body?.message || '').trim() || (Array.isArray(body?.files) && body.files.length > 0));
+}
+
+function compactHistoryText(value, maxChars = 5000) {
+  let text = typeof value === 'string' ? value : '';
+  if (!text) return '';
+  text = text.replace(/data:application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet;base64,[A-Za-z0-9+/=]+/g, '[已省略 Excel 原始 base64，附件内容已单独解析]');
+  text = text.replace(/UEsDB[A-Za-z0-9+/=]{1000,}/g, '[已省略疑似 XLSX/base64 大块内容]');
+  return text.length > maxChars ? text.slice(0, maxChars) + '\n[历史消息已截断]' : text;
+}
+
+function sanitizeHistory(history) {
+  if (!Array.isArray(history)) return [];
+  const out = [];
+  let total = 0;
+  for (const msg of history.slice(-8).reverse()) {
+    if (!msg || (msg.role !== 'user' && msg.role !== 'assistant')) continue;
+    let content = compactHistoryText(msg.content);
+    if (!content.trim()) continue;
+    const remain = 18000 - total;
+    if (remain <= 500) break;
+    if (content.length > remain) content = content.slice(0, remain) + '\n[历史上下文预算已截断]';
+    total += content.length;
+    out.unshift({ role: msg.role, content });
+  }
+  return out;
+}
+
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    timeout,
+  ]);
+}
+
+async function* withIterableTimeout(iterable, ms, message) {
+  const iterator = iterable[Symbol.asyncIterator]();
+  while (true) {
+    let timer;
+    const nextPromise = iterator.next();
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    });
+    const next = await Promise.race([
+      nextPromise,
+      timeout,
+    ]);
+    clearTimeout(timer);
+    if (next.done) return;
+    yield next.value;
+  }
+}
+
+function emptyModelReplyError(rounds) {
+  return `模型在第 ${rounds} 轮返回空内容，任务未完成。请用单轮模式重试，或缩小读取范围后继续执行。`;
 }
 
 async function runClaude(userText, task, model, jobRef, history, files) {
@@ -397,39 +580,46 @@ async function runClaude(userText, task, model, jobRef, history, files) {
   const systemPrompt = buildSystemPrompt(task);
   const userContent = buildUserContent(userText, files);
 
-  const messages = [...(Array.isArray(history) ? history : []), { role: 'user', content: userContent }];
+  const messages = [...sanitizeHistory(history), { role: 'user', content: userContent }];
   let reply = '';
   let rounds = 0;
+  let completed = false;
 
   while (rounds < MAX_TOOL_ROUNDS) {
     if (jobRef && jobRef._aborted) throw new Error('任务已取消');
     if (jobRef) jobRef._disconnected = jobRef._disconnected || false;
     rounds++;
+    setJobProgress(jobRef, 'thinking', rounds === 1 ? '正在请求模型生成' : '等待模型处理工具返回', { round: rounds });
+    appendJobLog(jobRef, 'model_request_start', { round: rounds, extra: { messages: messages.length } });
 
-    const response = await anthropic.messages.create({
+    const response = await withTimeout(anthropic.messages.create({
       model: selectedModel,
       max_tokens: 4096,
       system: systemPrompt,
       messages: messages,
       tools: FNS_TOOLS,
-    });
+    }), CLAUDE_TIMEOUT_MS, `模型第 ${rounds} 轮请求超过 ${Math.round(CLAUDE_TIMEOUT_MS / 1000)} 秒，任务未完成`);
+    appendJobLog(jobRef, 'model_response_done', { round: rounds, extra: { contentBlocks: response.content.length } });
 
     const textBlocks = response.content.filter((b) => b.type === 'text');
     const toolBlocks = response.content.filter((b) => b.type === 'tool_use');
 
     reply = textBlocks.map((b) => b.text).join('\n').trim();
 
-    if (toolBlocks.length === 0) break;
+    if (toolBlocks.length === 0) { completed = true; break; }
 
     const toolResults = [];
     for (const tool of toolBlocks) {
+      const details = summarizeToolInput(tool.input);
       try {
+        setJobProgress(jobRef, 'tool', `正在执行工具 ${tool.name}`, { toolName: tool.name, round: rounds, details });
         const result = await executeToolCall(tool.name, tool.input);
         toolResults.push({
           type: 'tool_result',
           tool_use_id: tool.id,
           content: JSON.stringify(result),
         });
+        setJobProgress(jobRef, 'thinking', `工具 ${tool.name} 已返回结果，等待模型处理`, { toolName: tool.name, round: rounds, details });
       } catch (err) {
         toolResults.push({
           type: 'tool_result',
@@ -437,6 +627,7 @@ async function runClaude(userText, task, model, jobRef, history, files) {
           content: JSON.stringify({ error: err.message || String(err) }),
           is_error: true,
         });
+        setJobProgress(jobRef, 'error', `工具 ${tool.name} 执行失败`, { toolName: tool.name, round: rounds, details });
       }
     }
 
@@ -444,13 +635,34 @@ async function runClaude(userText, task, model, jobRef, history, files) {
     messages.push({ role: 'user', content: toolResults });
   }
 
-  return reply || '完成';
+  if (!completed) {
+    const message = `工具调用达到上限 ${MAX_TOOL_ROUNDS} 轮，任务未完成。请缩小附件范围或继续执行剩余部分。`;
+    setJobProgress(jobRef, 'error', message, { round: rounds });
+    throw new Error(message);
+  }
+  if (!reply.trim()) {
+    const message = emptyModelReplyError(rounds);
+    setJobProgress(jobRef, 'error', message, { round: rounds });
+    throw new Error(message);
+  }
+  return reply;
 }
 
 // ── SSE helpers ──────────────────────────────────────────────────
 
 function sseWrite(res, event, data) {
-  if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  if (!res || res.destroyed || res.writableEnded || res.writableDestroyed) return false;
+  try {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sseEnd(res) {
+  if (!res || res.destroyed || res.writableEnded || res.writableDestroyed) return;
+  try { res.end(); } catch {}
 }
 
 // ── Run Claude with streaming ────────────────────────────────────
@@ -461,29 +673,34 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history, f
   const selectedModel = normalizeModel(model);
   const systemPrompt = buildSystemPrompt(task);
   const userContent = buildUserContent(userText, files);
-  const messages = [...(Array.isArray(history) ? history : []), { role: 'user', content: userContent }];
+  const messages = [...sanitizeHistory(history), { role: 'user', content: userContent }];
   let fullReply = '';
   let rounds = 0;
+  let completed = false;
 
   while (rounds < MAX_TOOL_ROUNDS) {
     if (jobRef && jobRef._aborted) throw new Error('任务已取消');
     if (jobRef) jobRef._disconnected = jobRef._disconnected || false;
     rounds++;
+    emitJobProgress(res, jobRef, 'thinking', rounds === 1 ? '正在请求模型生成' : '等待模型处理工具返回', { round: rounds });
+    appendJobLog(jobRef, 'model_stream_start', { round: rounds, extra: { messages: messages.length } });
 
-    const stream = await anthropic.messages.create({
+    const stream = await withTimeout(anthropic.messages.create({
       model: selectedModel,
       max_tokens: 4096,
       system: systemPrompt,
       messages,
       tools: FNS_TOOLS,
       stream: true,
-    });
+    }), CLAUDE_TIMEOUT_MS, `模型第 ${rounds} 轮请求超过 ${Math.round(CLAUDE_TIMEOUT_MS / 1000)} 秒，任务未完成`);
 
-    const contentBlocks = [];
+    let contentBlocks = [];
     let currentToolUse = null;
     let currentText = '';
+    const streamStats = {};
 
-    for await (const event of stream) {
+    for await (const event of withIterableTimeout(stream, CLAUDE_TIMEOUT_MS, `模型第 ${rounds} 轮流式响应超过 ${Math.round(CLAUDE_TIMEOUT_MS / 1000)} 秒，任务未完成`)) {
+      streamStats[event.type] = (streamStats[event.type] || 0) + 1;
       switch (event.type) {
         case 'content_block_start':
           if (event.content_block.type === 'text') {
@@ -495,6 +712,7 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history, f
         case 'content_block_delta':
           if (event.delta.type === 'text_delta') {
             currentText += event.delta.text;
+            if (jobRef) jobRef.partialReply = (jobRef.partialReply || '') + event.delta.text;
             sseWrite(res, 'text', { delta: event.delta.text });
           } else if (event.delta.type === 'input_json_delta') {
             currentToolUse.input += event.delta.partial_json;
@@ -508,10 +726,42 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history, f
           if (currentToolUse) {
             try { currentToolUse.input = JSON.parse(currentToolUse.input); } catch {}
             contentBlocks.push({ type: 'tool_use', ...currentToolUse });
+            emitJobProgress(res, jobRef, 'tool', `准备执行工具 ${currentToolUse.name}`, { toolName: currentToolUse.name, round: rounds, details: summarizeToolInput(currentToolUse.input) });
             sseWrite(res, 'tool', { name: currentToolUse.name, status: 'running' });
             currentToolUse = null;
           }
           break;
+      }
+    }
+    appendJobLog(jobRef, 'model_stream_done', { round: rounds, extra: { contentBlocks: contentBlocks.length, events: streamStats } });
+
+    if (contentBlocks.length === 0) {
+      appendJobLog(jobRef, 'model_stream_empty_retry', { round: rounds, extra: { messages: messages.length } });
+      emitJobProgress(res, jobRef, 'thinking', `第 ${rounds} 轮流式返回为空，改用非流式重试`, { round: rounds });
+      const retryResponse = await withTimeout(anthropic.messages.create({
+        model: selectedModel,
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages,
+        tools: FNS_TOOLS,
+      }), CLAUDE_TIMEOUT_MS, `模型第 ${rounds} 轮非流式重试超过 ${Math.round(CLAUDE_TIMEOUT_MS / 1000)} 秒，任务未完成`);
+      contentBlocks = Array.isArray(retryResponse.content) ? retryResponse.content : [];
+      appendJobLog(jobRef, 'model_retry_done', {
+        round: rounds,
+        extra: {
+          contentBlocks: contentBlocks.length,
+          stopReason: retryResponse.stop_reason || '',
+          usage: retryResponse.usage || null,
+        },
+      });
+      for (const block of contentBlocks) {
+        if (block.type === 'text' && block.text) {
+          if (jobRef) jobRef.partialReply = (jobRef.partialReply || '') + block.text;
+          sseWrite(res, 'text', { delta: block.text });
+        } else if (block.type === 'tool_use') {
+          emitJobProgress(res, jobRef, 'tool', `准备执行工具 ${block.name}`, { toolName: block.name, round: rounds, details: summarizeToolInput(block.input) });
+          sseWrite(res, 'tool', { name: block.name, status: 'running' });
+        }
       }
     }
 
@@ -519,13 +769,16 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history, f
     const textBlocks = contentBlocks.filter((b) => b.type === 'text');
     fullReply = textBlocks.map((b) => b.text).join('\n').trim();
 
-    if (toolBlocks.length === 0) break;
+    if (toolBlocks.length === 0) { completed = true; break; }
 
     const toolResults = [];
     for (const tool of toolBlocks) {
+      const details = summarizeToolInput(tool.input);
       try {
+        emitJobProgress(res, jobRef, 'tool', `正在执行工具 ${tool.name}`, { toolName: tool.name, round: rounds, details });
         const result = await executeToolCall(tool.name, tool.input);
         toolResults.push({ type: 'tool_result', tool_use_id: tool.id, content: JSON.stringify(result) });
+        emitJobProgress(res, jobRef, 'thinking', `工具 ${tool.name} 已返回结果，等待模型处理`, { toolName: tool.name, round: rounds, details });
         sseWrite(res, 'tool', { name: tool.name, status: 'done' });
       } catch (err) {
         toolResults.push({
@@ -534,6 +787,7 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history, f
           content: JSON.stringify({ error: err.message || String(err) }),
           is_error: true,
         });
+        emitJobProgress(res, jobRef, 'error', `工具 ${tool.name} 执行失败`, { toolName: tool.name, round: rounds, details });
         sseWrite(res, 'tool', { name: tool.name, status: 'error', error: err.message || String(err) });
       }
     }
@@ -542,8 +796,19 @@ async function runClaudeStreaming(userText, task, model, res, jobRef, history, f
     messages.push({ role: 'user', content: toolResults });
   }
 
-  sseWrite(res, 'done', { reply: fullReply || '完成' });
-  if (jobRef) jobRef.reply = fullReply || '完成';
+  if (!completed) {
+    const message = `工具调用达到上限 ${MAX_TOOL_ROUNDS} 轮，任务未完成。请缩小附件范围或继续执行剩余部分。`;
+    emitJobProgress(res, jobRef, 'error', message, { round: rounds });
+    throw new Error(message);
+  }
+  if (!fullReply.trim()) {
+    const message = emptyModelReplyError(rounds);
+    emitJobProgress(res, jobRef, 'error', message, { round: rounds });
+    throw new Error(message);
+  }
+  emitJobProgress(res, jobRef, 'done', '任务完成');
+  sseWrite(res, 'done', { reply: fullReply });
+  if (jobRef) jobRef.reply = fullReply;
 }
 
 // ── Job queue ────────────────────────────────────────────────────
@@ -556,10 +821,17 @@ function serializeJob(job) {
     model: job.model,
     taskPath: job.task?.path || '',
     reply: job.reply || '',
+    partialReply: job.partialReply || '',
     error: job.error || '',
     createdAt: job.createdAt,
     startedAt: job.startedAt || '',
     finishedAt: job.finishedAt || '',
+    stage: job.stage || job.status || '',
+    progressText: job.progressText || '',
+    progressUpdatedAt: job.progressUpdatedAt || '',
+    toolName: job.toolName || '',
+    round: job.round || 0,
+    progressLog: Array.isArray(job.progressLog) ? job.progressLog : [],
   };
 }
 
@@ -578,10 +850,17 @@ function enqueueJob({ message, task, model, history, files }) {
     history: history || [],
     files: files || [],
     createdAt: `${now.date} ${now.time}`,
+    stage: 'queued',
+    progressText: '排队中',
+    progressUpdatedAt: `${now.date} ${now.time}`,
+    toolName: '',
+    round: 0,
+    progressLog: [{ time: `${now.date} ${now.time}`, stage: 'queued', text: '排队中', toolName: '', round: 0 }],
     _aborted: false,
   };
   jobs.unshift(job);
   trimJobs();
+  appendJobLog(job, 'queued');
   processQueue();
   return job;
 }
@@ -594,14 +873,20 @@ async function processQueue() {
   const now = appNow();
   job.status = 'running';
   job.startedAt = `${now.date} ${now.time}`;
+  setJobProgress(job, 'thinking', '开始处理任务');
+  appendJobLog(job, 'started');
   try {
     job.reply = await runClaude(job.message, job.task, job.model, job, job.history, job.files);
     if (job._aborted) return;
     job.status = 'done';
+    setJobProgress(job, 'done', '任务完成');
+    appendJobLog(job, 'done');
   } catch (err) {
     if (job._aborted) return;
     job.error = err.message || String(err);
     job.status = 'failed';
+    setJobProgress(job, 'error', job.error || '任务失败');
+    appendJobLog(job, 'failed');
   } finally {
     const finished = appNow();
     job.finishedAt = `${finished.date} ${finished.time}`;
@@ -696,7 +981,7 @@ const html = `<!doctype html>
     .model-btn:hover{border-color:var(--accent-2);color:var(--text)}
     .trash-btn{height:28px;min-width:28px;border:0;background:transparent;color:var(--muted);font-size:14px;cursor:pointer;padding:0;border-radius:6px;display:flex;align-items:center;justify-content:center}
     .trash-btn:hover{color:var(--bad)}
-    .state{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:7px 10px;white-space:nowrap;background:rgba(255,255,255,.03);transition:all .3s}
+    .state{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:7px 10px;white-space:nowrap;background:rgba(255,255,255,.03);transition:all .3s;max-width:min(220px,34vw);overflow:hidden;text-overflow:ellipsis;flex-shrink:1}
     .cancel-btn{display:none;height:30px;width:30px;min-width:30px;border:1px solid var(--bad);border-radius:50%;background:transparent;color:var(--bad);font-size:14px;cursor:pointer;padding:0;line-height:1}
     .cancel-btn.visible{display:inline-flex;align-items:center;justify-content:center}
     .state[data-status="running"]{color:var(--accent);border-color:rgba(212,165,116,.45);animation:pulse 1.6s ease-in-out infinite}
@@ -704,7 +989,7 @@ const html = `<!doctype html>
     .state[data-status="error"]{color:var(--bad);border-color:rgba(255,145,135,.4)}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
     /* conversation layout */
-    .conv-layout{display:flex;min-height:0;flex:1;overflow:hidden;height:100%}
+    .conv-layout{display:flex;width:100%;max-width:100vw;min-width:0;min-height:0;flex:1;overflow:hidden;height:100%}
     .conv-sidebar{width:260px;min-width:260px;border-right:1px solid rgba(255,255,255,.04);background:rgba(10,14,13,.55);display:flex;flex-direction:column;overflow:hidden;backdrop-filter:blur(12px)}
     .conv-sidebar-header{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:center;gap:8px}
     .conv-sidebar-header span{font-size:13px;font-weight:700;color:var(--muted)}
@@ -713,25 +998,47 @@ const html = `<!doctype html>
     .conv-item:hover{background:rgba(255,255,255,.03)}
     .conv-item.active{background:rgba(100,210,193,.06);border-color:rgba(100,210,193,.15)}
     .conv-item-title{font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .conv-item-meta{font-size:11px;color:var(--muted);margin-top:2px;display:flex;gap:8px}
+    .conv-item-meta{font-size:11px;color:var(--muted);margin-top:2px;display:flex;gap:8px;align-items:center}
+    .conv-item.running .conv-item-title{color:var(--accent-2)}
+    .thinking-dots{display:inline-flex;gap:2px;align-items:center}
+    .thinking-dots span{width:4px;height:4px;border-radius:50%;background:var(--accent-2);animation:thinkBounce 1.2s infinite}
+    .thinking-dots span:nth-child(2){animation-delay:.2s}
+    .thinking-dots span:nth-child(3){animation-delay:.4s}
+    @keyframes thinkBounce{0%,60%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+    .msg.thinking{border-left-color:var(--accent-2);animation:pulse 1.5s ease-in-out infinite}
+    .progress-line{display:flex;align-items:center;gap:8px;margin-top:4px;color:var(--muted);font-size:13px;min-width:0}
+    .progress-line .progress-track{position:relative;flex:1;min-width:72px;height:3px;overflow:hidden;border-radius:999px;background:rgba(255,255,255,.08)}
+    .progress-line .progress-track::after{content:"";position:absolute;inset:0;width:42%;border-radius:999px;background:linear-gradient(90deg,transparent,var(--accent-2),transparent);animation:progressSweep 1.25s ease-in-out infinite}
+    @keyframes progressSweep{0%{transform:translateX(-110%)}100%{transform:translateX(250%)}}
+    .progress-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .conv-item .status-dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0;margin-top:5px}
     .status-dot.running{background:var(--accent-2);animation:pulse 1.2s infinite;box-shadow:0 0 6px rgba(100,210,193,.5)}
     .status-dot.done{background:var(--ok);box-shadow:0 0 4px rgba(143,229,167,.3)}
     .status-dot.failed{background:var(--bad);box-shadow:0 0 4px rgba(255,145,135,.3)}
+    .status-dot.cancelled{background:var(--bad);box-shadow:0 0 4px rgba(255,145,135,.3)}
     .status-dot.queued{background:var(--accent);box-shadow:0 0 4px rgba(212,165,116,.3)}
     #newConvBtn{width:100%;height:36px;margin:8px;border:1px dashed var(--line);border-radius:8px;background:transparent;color:var(--muted);font-size:13px;cursor:pointer;font-weight:650}
     #newConvBtn:hover{border-color:var(--accent-2);color:var(--text)}
-    main{padding:14px;overflow:auto;min-width:0;flex:1}
+    main{padding:14px;overflow:auto;overflow-x:hidden;min-width:0;max-width:100%;flex:1 1 0;width:0}
     .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);gap:8px}
     .empty-state .icon{font-size:40px;opacity:.3}
     .empty-state .text{font-size:14px}
     select{width:100%;height:42px;border:1px solid var(--line);border-radius:8px;background:#111615;color:var(--text);padding:0 10px;font:inherit;min-width:0;max-width:100%;outline:none;text-overflow:ellipsis;transition:border-color .2s,box-shadow .2s}
     select:focus,textarea:focus{border-color:rgba(212,165,116,.5);box-shadow:0 0 0 3px rgba(212,165,116,.1),0 0 20px rgba(212,165,116,.05)}
-    .thread{width:100%;max-width:880px;min-width:0;margin:0 auto;display:flex;flex-direction:column;gap:12px;padding-bottom:4px}
-    .msg{border-radius:14px;padding:14px 16px;line-height:1.65;white-space:pre-wrap;word-break:break-word;box-shadow:0 2px 16px rgba(0,0,0,.2);animation:msgIn .25s ease-out}
+    #page-chat{width:100%;min-width:0;max-width:100%;overflow-x:hidden}
+    .thread{width:100%;max-width:880px;min-width:0;margin:0 auto;display:flex;flex-direction:column;gap:12px;padding-bottom:4px;overflow-x:hidden}
+    .msg{border-radius:14px;padding:14px 16px;line-height:1.65;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;box-shadow:0 2px 16px rgba(0,0,0,.2);animation:msgIn .12s ease-out;min-width:0;max-width:100%;overflow-x:auto}
+    .msg *{max-width:100%;min-width:0;overflow-wrap:anywhere}
+    .msg pre{max-width:100%;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+    .msg code{white-space:pre-wrap;word-break:break-word}
+    .msg table{max-width:100%;overflow-x:auto}
+    .msg th,.msg td{overflow-wrap:anywhere;word-break:break-word}
+    .ops-log{margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06);color:var(--muted);font-size:12px;line-height:1.55}
+    .ops-log summary{cursor:pointer;color:var(--accent-2);font-weight:650;outline:none}
+    .ops-log div{margin-top:4px;overflow-wrap:anywhere}
     .msg.user{margin-left:auto;max-width:min(760px,92%);background:linear-gradient(135deg,rgba(212,165,116,.1),rgba(212,165,116,.04));border:1px solid rgba(212,165,116,.18);border-right:3px solid rgba(212,165,116,.45);box-shadow:0 2px 16px rgba(212,165,116,.06)}
     .msg.assistant{margin-right:auto;max-width:min(820px,100%);background:linear-gradient(135deg,rgba(100,210,193,.05),rgba(100,210,193,.01));border:1px solid rgba(100,210,193,.08);border-left:3px solid rgba(100,210,193,.3);box-shadow:0 2px 16px rgba(100,210,193,.04)}
-    @keyframes msgIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes msgIn{from{opacity:0}to{opacity:1}}
     .meta{font-size:12px;color:var(--muted);margin-bottom:4px}
     .scroll-hint{position:sticky;bottom:6px;display:none;margin:8px auto 0;height:34px;min-width:100px;border:1px solid rgba(100,210,193,.4);border-radius:999px;background:rgba(16,20,19,.94);color:var(--accent-2);font-size:13px;font-weight:650;cursor:pointer;backdrop-filter:blur(12px);box-shadow:0 4px 20px rgba(0,0,0,.4),0 0 12px rgba(100,210,193,.1)}
     .scroll-hint.visible{display:block}
@@ -741,7 +1048,7 @@ const html = `<!doctype html>
     .typing-dots span:nth-child(3){animation-delay:.4s}
     @keyframes dotPulse{0%,60%{opacity:.2}30%{opacity:1}}
     .tool-note{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
-    form{width:100%;min-width:0;z-index:2;padding:10px max(12px,env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right));border-top:1px solid rgba(255,255,255,.04);background:rgba(8,10,10,.88);backdrop-filter:blur(24px) saturate(120%);box-shadow:0 -8px 32px rgba(0,0,0,.3)}
+    form{width:100%;max-width:100vw;min-width:0;z-index:2;padding:10px max(12px,env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right));border-top:1px solid rgba(255,255,255,.04);background:rgba(8,10,10,.88);backdrop-filter:blur(24px) saturate(120%);box-shadow:0 -8px 32px rgba(0,0,0,.3);overflow-x:hidden}
     .bar{width:100%;max-width:880px;min-width:0;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
     textarea{width:100%;min-height:54px;max-height:160px;resize:none;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(17,22,21,.8);color:var(--text);padding:12px 14px;outline:none;font:inherit;line-height:1.45;transition:border-color .2s,box-shadow .2s;backdrop-filter:blur(4px)}
     .char-count{font-size:11px;color:var(--muted);text-align:right;grid-column:1 / -1;margin-top:2px}
@@ -767,7 +1074,7 @@ const html = `<!doctype html>
     .bb-tab span{font-size:10px;font-weight:650}
     .bb-tab.on{color:var(--accent-2)}
     /* page panels */
-    .page-panel{display:none;flex:1;overflow:auto;padding:14px}
+    .page-panel{display:none;flex:1;width:100%;min-width:0;max-width:100%;overflow:auto;overflow-x:hidden;padding:14px}
     .page-panel.active{display:flex;flex-direction:column}
     .page-title{font-size:16px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
     .page-content{flex:1;overflow:auto}
@@ -785,6 +1092,13 @@ const html = `<!doctype html>
     .todo-check.done{background:var(--ok);border-color:var(--ok)}
     .todo-text{font-size:14px}
     .todo-text.done{text-decoration:line-through;color:var(--muted)}
+    .todo-toolbar{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+    .todo-toolbar .chip{height:30px;font-size:12px;padding:0 10px}
+    .todo-day-chips{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
+    .schedule-item{border:1px solid var(--line);background:rgba(255,255,255,.03);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+    .schedule-time{font-size:12px;color:var(--accent-2);font-weight:750;margin-bottom:4px}
+    .schedule-title{font-size:14px;font-weight:750}
+    .schedule-meta{font-size:12px;color:var(--muted);margin-top:4px}
     @media (min-width: 960px){
       html,body{overflow:hidden}
       .app{height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto}
@@ -793,6 +1107,7 @@ const html = `<!doctype html>
     }
     @media (max-width: 959px){
       .conv-layout{flex-direction:column;position:relative}
+      main{width:100%;flex:1 1 auto}
       .conv-sidebar{position:fixed;top:0;left:0;width:280px;height:100dvh;z-index:10;transform:translateX(-100%);transition:transform .25s;-webkit-overflow-scrolling:touch}
       .conv-sidebar.open{transform:translateX(0);box-shadow:4px 0 24px rgba(0,0,0,.5)}
       .conv-sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9}
@@ -880,7 +1195,16 @@ const html = `<!doctype html>
         </div>
         <!-- Todos page -->
         <div class="page-panel" id="page-todos">
-          <div class="page-title">✅ 待办 · <span id="todoDate"></span></div>
+          <div class="page-title" style="justify-content:space-between">
+            <span id="todoTitle">✅ 待办</span>
+            <span id="todoDate" style="font-size:14px;color:var(--muted)"></span>
+          </div>
+          <div class="todo-toolbar">
+            <button id="todoPrev" class="chip" type="button">◀</button>
+            <button id="todoToday" class="chip" type="button">今天</button>
+            <button id="todoNext" class="chip" type="button">▶</button>
+          </div>
+          <div class="todo-day-chips" id="todoDayChips"></div>
           <div class="page-content" id="todoList"></div>
         </div>
       </main>
@@ -906,6 +1230,8 @@ const html = `<!doctype html>
   <script>
     // ── DOM refs ──
     const thread = document.getElementById('thread');
+    const chatPage = document.getElementById('page-chat');
+    const mainPanel = thread.closest('main');
     const scrollHint = document.getElementById('scrollHint');
     const form = document.getElementById('form');
     const input = document.getElementById('input');
@@ -937,6 +1263,22 @@ const html = `<!doctype html>
     let singleTurn = false;
     let streamingAbort = null;
     let toastTimer = null;
+    const TODO_TASK_PATH = '000 PARA/020 Areas/AI任务/要做的事情记录.md';
+    const SCHEDULE_TASK_PATH = '000 PARA/020 Areas/AI任务/按照格式建立日程.md';
+    let todoMode = 'todos';
+    let todoSelectedDate = '';
+    const todoCache = {};
+    const calendarCache = {};
+    window.addEventListener('error', e => {
+      const msg = e?.message || '前端脚本错误';
+      toast(msg);
+      setUiState('error', 'error');
+    });
+    window.addEventListener('unhandledrejection', e => {
+      const msg = e?.reason?.message || String(e?.reason || '前端异步错误');
+      toast(msg);
+      setUiState('error', 'error');
+    });
 
     // ── Conversation helpers ──
     function loadConversations() {
@@ -961,15 +1303,131 @@ const html = `<!doctype html>
         status: 'active'
       };
     }
+    const stageLabels = {
+      queued: '排队中',
+      starting: '启动任务',
+      thinking: '生成回复',
+      tool: '执行工具',
+      done: '任务完成',
+      failed: '任务失败',
+      error: '任务失败',
+      cancelled: '已取消'
+    };
+    function statusForStage(stage, fallback) {
+      if (stage === 'queued') return 'queued';
+      if (stage === 'error' || stage === 'failed') return 'error';
+      if (stage === 'cancelled') return 'error';
+      return fallback || (stage === 'done' ? '' : 'running');
+    }
+    function progressTextFor(item) {
+      if (!item) return '处理中';
+      return item.progressText || stageLabels[item.stage] || stageLabels[item.status] || '处理中';
+    }
+    function applyJobProgress(conv, job) {
+      if (!conv || !job) return;
+      if (job.id) conv._jobId = job.id;
+      if (job.stage) conv.stage = job.stage;
+      if (job.status) conv.status = job.status;
+      if (job.progressText) conv.progressText = job.progressText;
+      if (job.progressUpdatedAt) conv.progressUpdatedAt = job.progressUpdatedAt;
+      if (Object.prototype.hasOwnProperty.call(job, 'partialReply')) conv.partialReply = job.partialReply || '';
+      if (Object.prototype.hasOwnProperty.call(job, 'toolName')) conv.toolName = job.toolName || '';
+      if (Object.prototype.hasOwnProperty.call(job, 'round')) conv.round = job.round || 0;
+      if (Array.isArray(job.progressLog)) conv.progressLog = job.progressLog;
+    }
+    const HISTORY_MAX_MESSAGES = 8;
+    const HISTORY_MESSAGE_MAX_CHARS = 5000;
+    const HISTORY_TOTAL_MAX_CHARS = 18000;
+    function compactHistoryContent(content) {
+      let text = typeof content === 'string' ? content : '';
+      if (!text) return '';
+      text = text.replace(/data:application\\/vnd\\.openxmlformats-officedocument\\.spreadsheetml\\.sheet;base64,[A-Za-z0-9+/=]+/g, '[已省略 Excel 原始 base64，附件内容已单独解析]');
+      text = text.replace(/UEsDB[A-Za-z0-9+/=]{1000,}/g, '[已省略疑似 XLSX/base64 大块内容]');
+      if (text.length > HISTORY_MESSAGE_MAX_CHARS) text = text.slice(0, HISTORY_MESSAGE_MAX_CHARS) + '\\n[历史消息已截断]';
+      return text;
+    }
+    function buildHistoryForRequest(conv) {
+      if (singleTurn || !conv || !Array.isArray(conv.messages)) return [];
+      const recent = conv.messages.slice(0, -1).slice(-HISTORY_MAX_MESSAGES).reverse();
+      const out = [];
+      let total = 0;
+      for (const msg of recent) {
+        if (!msg || (msg.role !== 'user' && msg.role !== 'assistant')) continue;
+        let content = compactHistoryContent(msg.content);
+        if (!content.trim()) continue;
+        const remain = HISTORY_TOTAL_MAX_CHARS - total;
+        if (remain <= 500) break;
+        if (content.length > remain) content = content.slice(0, remain) + '\\n[历史上下文预算已截断]';
+        total += content.length;
+        out.unshift({ role: msg.role, content });
+      }
+      return out;
+    }
+    function progressLogLines(log) {
+      if (!Array.isArray(log) || !log.length) return [];
+      const seen = new Set();
+      return log
+        .filter(item => item && item.text)
+        .map(item => {
+          const time = item.time ? String(item.time).split(' ').pop() : '';
+          const detail = item.details ? ' · ' + item.details : '';
+          const label = time ? time + ' ' + item.text + detail : item.text + detail;
+          return { key: item.stage + '|' + item.text + '|' + (item.toolName || '') + '|' + (item.details || ''), label };
+        })
+        .filter(item => {
+          if (seen.has(item.key)) return false;
+          seen.add(item.key);
+          return true;
+        })
+        .slice(-12)
+        .map(item => item.label);
+    }
+    function formatRecoveredReply(job, fallbackText) {
+      return fallbackText || job.reply || job.partialReply || '[无有效回复]';
+    }
+    function appendAssistantOnce(conv, content, opts) {
+      if (!conv || !content) return false;
+      opts = opts || {};
+      const jobId = opts.jobId || conv._jobId || '';
+      if (jobId && conv._completedJobId === jobId) return false;
+      const last = conv.messages && conv.messages[conv.messages.length - 1];
+      if (last && last.role === 'assistant' && last.content === content) {
+        if (jobId) { conv._completedJobId = jobId; conv._jobId = ''; }
+        return false;
+      }
+      conv.messages.push({role: 'assistant', content, time: opts.time || nowStr(), ops: opts.ops || []});
+      if (jobId) { conv._completedJobId = jobId; conv._jobId = ''; }
+      return true;
+    }
+    function operationMarkup(lines) {
+      if (!Array.isArray(lines) || !lines.length) return '';
+      return '<details class="ops-log"><summary>执行记录 (' + lines.length + ')</summary>' + lines.map(line => '<div>• ' + escapeHtml(line) + '</div>').join('') + '</details>';
+    }
+    function progressMarkup(text) {
+      return '<div class="progress-line"><span class="thinking-dots"><span></span><span></span><span></span></span><span class="progress-text">' + escapeHtml(text || '处理中') + '</span><span class="progress-track"></span></div>';
+    }
+    function progressLogMarkup(log) {
+      const lines = progressLogLines(log);
+      if (!lines.length) return '';
+      return '<div style="margin-top:8px;color:var(--muted);font-size:12px;line-height:1.55">' + lines.map(line => '<div>• ' + escapeHtml(line) + '</div>').join('') + '</div>';
+    }
+    function setUiState(text, status) {
+      state.textContent = text || 'ready';
+      state.dataset.status = status || '';
+    }
     function renderConvList() {
       convList.innerHTML = conversations.slice().reverse().map(c => {
         let statusClass = c.status || 'active';
-        return '<div class="conv-item' + (c.id === activeConvId ? ' active' : '') + '" data-id="' + c.id + '">' +
+        const activeJob = c.status === 'running' || c.status === 'queued';
+        const meta = activeJob
+          ? '<span class="thinking-dots"><span></span><span></span><span></span></span><span class="progress-text">' + escapeHtml(progressTextFor(c)) + '</span>'
+          : '<span>' + (c.updatedAt || '') + '</span><span>' + c.messages.length + ' 条</span>';
+        return '<div class="conv-item ' + statusClass + (c.id === activeConvId ? ' active' : '') + '" data-id="' + c.id + '">' +
           '<div style="display:flex;align-items:flex-start;gap:6px">' +
           '<span class="status-dot ' + statusClass + '"></span>' +
           '<div style="min-width:0">' +
           '<div class="conv-item-title">' + escapeHtml(c.title) + '</div>' +
-          '<div class="conv-item-meta"><span>' + (c.updatedAt || '') + '</span><span>' + c.messages.length + ' 条</span></div>' +
+          '<div class="conv-item-meta">' + meta + '</div>' +
           '</div></div></div>';
       }).join('');
     }
@@ -986,12 +1444,28 @@ const html = `<!doctype html>
         thread.innerHTML = '<div class="empty-state"><div class="icon">💬</div><div class="text">新对话</div></div>';
         return;
       }
-      thread.innerHTML = conv.messages.map(m => {
+      const msgs = conv.messages.map(m => {
         const role = m.role === 'user' ? 'user' : 'assistant';
         const label = m.role === 'user' ? '你' : 'Claude';
-        return '<div class="msg ' + role + '"><div class="meta">' + label + ' · ' + (m.time || '') + '</div>' + formatMarkdown(m.content) + '</div>';
+        return '<div class="msg ' + role + '"><div class="meta">' + label + ' · ' + (m.time || '') + '</div>' + formatMarkdown(m.content) + operationMarkup(m.ops) + '</div>';
       }).join('');
+      const liveText = '<div class="live-text" style="margin-bottom:8px">' + (conv.partialReply ? formatMarkdown(conv.partialReply) : '') + '</div>';
+      const thinking = (conv.status === 'running' || conv.status === 'queued') ? '<div class="msg assistant thinking"><div class="meta">Claude · <span class="progress-time">' + (conv.progressUpdatedAt ? conv.progressUpdatedAt.split(' ').pop() : '') + '</span></div>' + liveText + progressMarkup(progressTextFor(conv)) + '<div class="progress-log">' + progressLogMarkup(conv.progressLog) + '</div></div>' : '';
+      thread.innerHTML = msgs + thinking;
       scrollToBottom();
+    }
+    function updateRunningMessage(conv) {
+      if (!conv || conv.id !== activeConvId) return;
+      const bubble = thread.querySelector('.msg.thinking');
+      if (!bubble) { renderMessages(conv); return; }
+      const timeEl = bubble.querySelector('.progress-time');
+      const liveEl = bubble.querySelector('.live-text');
+      const progressEl = bubble.querySelector('.progress-text');
+      const logEl = bubble.querySelector('.progress-log');
+      if (timeEl) timeEl.textContent = conv.progressUpdatedAt ? conv.progressUpdatedAt.split(' ').pop() : '';
+      if (liveEl) liveEl.innerHTML = conv.partialReply ? formatMarkdown(conv.partialReply) : '';
+      if (progressEl) progressEl.textContent = progressTextFor(conv);
+      if (logEl) logEl.innerHTML = progressLogMarkup(conv.progressLog);
     }
     function ensureActiveConv() {
       if (activeConvId && findConv(activeConvId)) return;
@@ -1011,7 +1485,7 @@ const html = `<!doctype html>
       sidebarBackdrop.classList.toggle('open');
     }
     function escapeHtml(text) {
-      return text.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+      return String(text || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
     }
 
     // ── Slots ──
@@ -1068,59 +1542,97 @@ const html = `<!doctype html>
     // ── Helpers ──
     function toast(msg) { toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.classList.remove('show'); }, 2000); }
     function nowStr() { const d = new Date(); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0'); }
-    function scrollToBottom() { const last = thread.lastElementChild; if (last) { last.scrollIntoView({block:'end'}); scrollHint.classList.remove('visible'); } }
+    function resetHorizontalScroll() {
+      [document.scrollingElement, document.documentElement, document.body, mainPanel, chatPage, thread.parentElement].forEach(el => {
+        if (el) el.scrollLeft = 0;
+      });
+    }
+    function scrollToBottom() {
+      [mainPanel, chatPage].forEach(el => {
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
+        el.scrollLeft = 0;
+      });
+      resetHorizontalScroll();
+      requestAnimationFrame(resetHorizontalScroll);
+      scrollHint.classList.remove('visible');
+    }
 
     // ── Streaming bubble ──
     function addStreamingBubble() {
       const div = document.createElement('div');
       div.className = 'msg assistant';
-      div.innerHTML = '<div class="meta">Claude · ' + nowStr() + '</div><span class="stream-text"></span><span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
+      div.innerHTML = '<div class="meta">Claude · ' + nowStr() + '</div>' + progressMarkup('准备中') + '<span class="stream-text"></span><span class="typing-dots stream-dots"><span>.</span><span>.</span><span>.</span></span>';
       thread.appendChild(div); scrollToBottom();
       const textEl = div.querySelector('.stream-text');
-      let dotsEl = div.querySelector('.typing-dots');
+      let dotsEl = div.querySelector('.stream-dots');
+      let progressEl = div.querySelector('.progress-text');
+      let progressLine = div.querySelector('.progress-line');
       return {
         div,
         appendText: function(d) { if (dotsEl) { dotsEl.remove(); dotsEl = null; } textEl.textContent += d; scrollToBottom(); },
-        setText: function(t) { if (dotsEl) { dotsEl.remove(); dotsEl = null; } textEl.textContent = t; },
-        finalize: function() { if (dotsEl) { dotsEl.remove(); dotsEl = null; } }
+        setText: function(t) { if (dotsEl) { dotsEl.remove(); dotsEl = null; } if (progressLine) { progressLine.remove(); progressLine = null; } textEl.textContent = t; },
+        setProgress: function(t) { if (progressEl) progressEl.textContent = t || '处理中'; scrollToBottom(); },
+        finalize: function() { if (dotsEl) { dotsEl.remove(); dotsEl = null; } if (progressLine) { progressLine.remove(); progressLine = null; } }
       };
     }
 
     // ── Submit ──
     async function submit(text) {
-      if (streamingAbort) { streamingAbort.abort(); streamingAbort = null; }
+      if (streamingAbort) { toast('任务运行中'); return; }
       const prompt = text.trim();
-      if (!prompt) return;
+      if (filesLoading) { toast('附件仍在读取/解析中'); return; }
+      const hasFiles = pendingFiles.length > 0;
+      if (!prompt && !hasFiles) return;
       input.value = '';
       charCount.textContent = '';
       const files = pendingFiles; pendingFiles = [];
       uploadBtn.textContent = '📎'; uploadBtn.style.color = ''; uploadBtn.style.borderColor = '';
+      const userPrompt = prompt || '请处理附件内容。';
 
       // Create or reuse conversation
       if (singleTurn || !activeConvId || !findConv(activeConvId)) {
-        const conv = newConversation(prompt);
+        const conv = newConversation(userPrompt);
         conversations.unshift(conv);
         activeConvId = conv.id;
       }
       const conv = findConv(activeConvId);
-      conv.title = conv.messages.length === 0 ? (conv.title.split(' ').slice(0,1).join(' ') + ' ' + (prompt + (files.length > 0 ? ' 📎' + files.length : '')).slice(0, 45)) : conv.title;
+      conv.title = conv.messages.length === 0 ? (conv.title.split(' ').slice(0,1).join(' ') + ' ' + (userPrompt + (files.length > 0 ? ' 📎' + files.length : '')).slice(0, 45)) : conv.title;
       conv.status = 'running';
-      const userContent = files.length > 0 ? prompt + '\\n\\n📎 ' + files.map(f=>f.name).join(', ') : prompt;
-      conv.messages.push({role: 'user', content: userContent, time: nowStr()});
-      saveConversations();
+      conv.stage = 'starting';
+      conv.progressText = '准备发送任务';
+      conv.progressUpdatedAt = nowStr();
+      // Build final message: prompt + file contents inline
+      let finalMsg = userPrompt;
+      let displayMsg = userPrompt;
+      if (files.length > 0) {
+        const fileNames = files.map(f => '📎 ' + f.name).join(', ');
+        const fileTexts = files.filter(f => !f.isImage && f.data).map(f => '\\n--- ' + f.name + ' ---\\n' + f.data).join('\\n');
+        finalMsg = userPrompt + '\\n\\n' + fileNames + fileTexts;
+        const fileSummaries = files.map(f => {
+          const size = f.data ? String(f.data).length : 0;
+          const preview = (!f.isImage && f.data) ? String(f.data).slice(0, 300) : '';
+          return '📎 ' + f.name + (size ? '（' + size + ' 字符）' : '') + (preview ? '\\n' + preview + (size > 300 ? '\\n[附件内容已省略，发送给模型时使用完整内容]' : '') : '');
+        }).join('\\n\\n');
+        displayMsg = userPrompt + '\\n\\n' + fileSummaries;
+      }
+      conv.messages.push({role: 'user', content: displayMsg, time: nowStr()});
+      let historyForRequest = [];
+      try { historyForRequest = buildHistoryForRequest(conv); } catch (e) { historyForRequest = []; }
+      try { saveConversations(); } catch {}
       renderConvList();
-      renderMessages(conv);
+      renderMessages({...conv, status: 'active', stage: 'active', progressText: ''});
 
-      state.textContent = 'thinking';
-      state.dataset.status = '';
+      setUiState('连接中', 'running');
       send.disabled = true;
       const bubble = addStreamingBubble();
+      bubble.setProgress('连接服务中');
       let fullText = '';
 
       try {
         const resp = await fetch('/api/chat/stream', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({message: prompt, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel, history: singleTurn ? [] : (conv.messages || []).slice(-20), files: files}),
+          body: JSON.stringify({message: finalMsg, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel, history: historyForRequest, files: files.filter(f => f.isImage)}),
           signal: (streamingAbort = new AbortController()).signal
         });
         if (!resp.ok) { const ed = await resp.json().catch(()=>({error:'HTTP '+resp.status})); throw new Error(ed.error||'请求失败'); }
@@ -1137,10 +1649,34 @@ const html = `<!doctype html>
             else if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));
-                if (eventType === 'meta') { conv._jobId = data.jobId; saveConversations(); }
-                else if (eventType === 'text') { fullText += data.delta; bubble.appendText(data.delta); }
-                else if (eventType === 'done') { if (!fullText.trim()) bubble.setText(data.reply || '完成'); }
-                else if (eventType === 'error') { bubble.setText('失败：' + escapeHtml(data.message)); }
+                if (eventType === 'meta') {
+                  applyJobProgress(conv, { id: data.jobId, stage: data.stage || 'starting', progressText: data.progressText || '任务已创建', progressUpdatedAt: data.progressUpdatedAt });
+                  bubble.setProgress(progressTextFor(conv));
+                  setUiState(progressTextFor(conv), statusForStage(conv.stage));
+                  saveConversations(); renderConvList();
+                }
+                else if (eventType === 'progress') {
+                  applyJobProgress(conv, data);
+                  bubble.setProgress(progressTextFor(conv));
+                  setUiState(progressTextFor(conv), statusForStage(conv.stage));
+                  saveConversations(); renderConvList();
+                }
+                else if (eventType === 'text') { fullText += data.delta; conv.partialReply = fullText; bubble.appendText(data.delta); }
+                else if (eventType === 'tool') {
+                  const toolText = data.status === 'done' ? '工具 ' + data.name + ' 已完成' : (data.status === 'error' ? '工具 ' + data.name + ' 失败' : '正在执行工具 ' + data.name);
+                  applyJobProgress(conv, { stage: data.status === 'error' ? 'error' : 'tool', progressText: toolText, toolName: data.name });
+                  bubble.setProgress(toolText);
+                  setUiState(toolText, statusForStage(conv.stage));
+                  saveConversations(); renderConvList();
+                }
+                else if (eventType === 'done') {
+                  applyJobProgress(conv, { stage: 'done', progressText: '任务完成' });
+                  if (!fullText.trim()) bubble.setText(data.reply || '完成');
+                }
+                else if (eventType === 'error') {
+                  applyJobProgress(conv, { stage: 'error', status: 'failed', progressText: data.message || '任务失败' });
+                  bubble.setText('失败：' + data.message);
+                }
               } catch {}
               eventType = '';
             }
@@ -1149,50 +1685,67 @@ const html = `<!doctype html>
         bubble.finalize();
         if (fullText.trim()) {
           bubble.div.querySelector('.stream-text').innerHTML = formatMarkdown(fullText.trim());
-          conv.messages.push({role: 'assistant', content: fullText.trim(), time: nowStr()});
+          appendAssistantOnce(conv, fullText.trim(), {jobId: conv._jobId, ops: progressLogLines(conv.progressLog)});
         }
         conv.status = 'done';
+        conv.stage = 'done';
+        conv.progressText = '任务完成';
+        conv.partialReply = '';
         conv.updatedAt = nowStr();
-        state.textContent = 'ready';
+        setUiState('ready', '');
       } catch (err) {
         if (err.name === 'AbortError') {
-          bubble.setText('[已取消]'); conv.status = 'done'; conv.updatedAt = nowStr(); state.textContent = 'ready';
+          bubble.setText('[已取消]'); conv.status = 'done'; conv.stage = 'cancelled'; conv.progressText = '已取消'; conv.updatedAt = nowStr(); setUiState('ready', '');
         } else {
           // Fallback: job queue
           try {
             bubble.finalize();
             const fb = addStreamingBubble();
-            const jr = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message: prompt, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel})});
+            fb.setProgress('流式连接失败，已转入队列');
+            const jr = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message: finalMsg, taskPath: paradigmSelect.value, taskContent: paradigmCache[paradigmSelect.value] || '', model: currentModel, history: historyForRequest, files: files.filter(f => f.isImage)})});
             const jd = await jr.json();
             if (!jr.ok) throw new Error(jd.error||'请求失败');
-            fb.setText('处理中...');
+            applyJobProgress(conv, jd.job);
+            fb.setProgress(progressTextFor(conv));
             const pid = setInterval(async () => {
               try {
                 const pr = await fetch('/api/jobs'); const pd = await pr.json();
                 const found = pd.jobs.find(j => j.id === jd.job.id);
-                if (found && (found.status === 'done' || found.status === 'failed')) {
+                if (found) {
+                  applyJobProgress(conv, found);
+                  fb.setProgress(progressTextFor(conv));
+                  setUiState(progressTextFor(conv), statusForStage(conv.stage, found.status));
+                  saveConversations(); renderConvList();
+                }
+                if (found && (found.status === 'done' || found.status === 'failed' || found.status === 'cancelled')) {
                   clearInterval(pid); fb.finalize();
                   if (found.status === 'done') {
-                    conv.messages.push({role: 'assistant', content: found.reply, time: nowStr()});
+                    appendAssistantOnce(conv, formatRecoveredReply(found, found.reply), {jobId: found.id, ops: progressLogLines(found.progressLog)});
+                    renderMessages(conv);
+                  } else if (found.status === 'cancelled') {
+                    appendAssistantOnce(conv, formatRecoveredReply(found, '[已取消]'), {jobId: found.id, ops: progressLogLines(found.progressLog)});
                     renderMessages(conv);
                   } else {
-                    conv.messages.push({role: 'assistant', content: '失败：' + found.error, time: nowStr()});
+                    appendAssistantOnce(conv, formatRecoveredReply(found, '失败：' + found.error), {jobId: found.id, ops: progressLogLines(found.progressLog)});
                     renderMessages(conv);
                   }
-                  conv.status = found.status === 'done' ? 'done' : 'failed';
+                  conv.status = found.status;
+                  conv.stage = found.status === 'done' ? 'done' : (found.status === 'cancelled' ? 'cancelled' : 'error');
                   conv.updatedAt = nowStr();
                   saveConversations(); renderConvList();
-                  state.textContent = 'ready';
+                  setUiState('ready', '');
                 }
               } catch {}
             }, 2000);
-            state.textContent = 'queued';
+            setUiState(progressTextFor(conv), 'queued');
           } catch (fe) {
             conv.status = 'failed';
+            conv.stage = 'error';
+            conv.progressText = fe.message || '任务失败';
             conv.updatedAt = nowStr();
-            conv.messages.push({role: 'assistant', content: '失败：' + (fe.message||'未知错误'), time: nowStr()});
+            appendAssistantOnce(conv, '失败：' + (fe.message||'未知错误'));
             renderMessages(conv);
-            state.textContent = 'error'; state.dataset.status = 'error';
+            setUiState('error', 'error');
           }
         }
       } finally {
@@ -1211,7 +1764,7 @@ const html = `<!doctype html>
     });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSidebar(); });
     cancelBtn.addEventListener('click', async () => {
-      if (streamingAbort) { streamingAbort.abort(); streamingAbort = null; toast('已取消'); return; }
+      if (streamingAbort) { streamingAbort.abort(); streamingAbort = null; }
       try { const r = await fetch('/api/job/cancel', {method:'POST'}); const d = await r.json(); if (!r.ok) throw new Error(d.error); toast('已取消'); } catch (e) { /* ignore */ }
     });
     scrollHint.addEventListener('click', () => { scrollToBottom(); });
@@ -1267,18 +1820,35 @@ const html = `<!doctype html>
     // ── Page tabs ──
     let currentPage = 'chat';
     const tabPages = { chat: showChatPage, bills: showBillsPage, todos: showTodosPage };
-    document.getElementById('bottomBar').addEventListener('click', e => {
-      const tab = e.target.closest('.bb-tab');
-      if (!tab || tab.dataset.page === currentPage) return;
-      document.querySelectorAll('.bb-tab').forEach(t => t.classList.remove('on'));
-      tab.classList.add('on');
-      currentPage = tab.dataset.page;
+    let todoClickTimer = null;
+    function activatePage(page) {
+      document.querySelectorAll('.bb-tab').forEach(t => t.classList.toggle('on', t.dataset.page === page));
+      currentPage = page;
       document.querySelectorAll('.page-panel').forEach(p => p.classList.remove('active'));
       document.getElementById('page-' + currentPage).classList.add('active');
-      // Show/hide form for chat vs other pages
       const isChat = currentPage === 'chat';
       document.getElementById('form').style.display = isChat ? '' : 'none';
       document.getElementById('bottomBar').style.display = '';
+    }
+    document.getElementById('bottomBar').addEventListener('click', e => {
+      const tab = e.target.closest('.bb-tab');
+      if (!tab) return;
+      const page = tab.dataset.page;
+      if (page === 'todos') {
+        clearTimeout(todoClickTimer);
+        if (e.detail >= 2) {
+          activatePage('todos');
+          showTodosPage('schedule');
+        } else {
+          todoClickTimer = setTimeout(() => {
+            activatePage('todos');
+            showTodosPage('todos');
+          }, 220);
+        }
+        return;
+      }
+      if (page === currentPage) return;
+      activatePage(page);
       if (tabPages[currentPage]) tabPages[currentPage]();
     });
 
@@ -1390,24 +1960,111 @@ const html = `<!doctype html>
       billMonth = String(m).padStart(2,'0'); billYear = y;
       loadBills(billYear, billMonth);
     });
-    async function showTodosPage() {
-      const d = new Date();
-      const ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-      document.getElementById('todoDate').textContent = ds;
+    function dateKey(d) {
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    }
+    function addDate(ds, n) {
+      const d = new Date(ds + 'T12:00:00');
+      d.setDate(d.getDate() + n);
+      return dateKey(d);
+    }
+    function weekday(ds) {
+      return ['周日','周一','周二','周三','周四','周五','周六'][new Date(ds + 'T12:00:00').getDay()];
+    }
+    async function selectParadigmByPath(path) {
+      if (!path || !paradigmSelect.querySelector('option[value="' + path.replace(/"/g,'&quot;') + '"]')) return;
+      paradigmSelect.value = path;
+      try { localStorage.setItem('claudenotes_paradigm', path); } catch {}
+      if (paradigmCache[path] === undefined) {
+        try {
+          const r = await fetch('/api/task?path=' + encodeURIComponent(path));
+          const d = await r.json();
+          if (r.ok) paradigmCache[path] = d.content || '';
+        } catch {}
+      }
+      updateSlotUI();
+    }
+    function renderTodoChips() {
+      const days = [-3,-2,-1,0,1,2,3].map(n => addDate(todoSelectedDate, n));
+      document.getElementById('todoDayChips').innerHTML = days.map(ds => {
+        const label = ds.slice(5) + ' ' + weekday(ds);
+        return '<button class="chip todo-day-chip' + (ds === todoSelectedDate ? ' on' : '') + '" data-date="' + ds + '" type="button">' + label + '</button>';
+      }).join('');
+    }
+    async function loadTodoDate(ds) {
+      if (todoCache[ds] !== undefined) return todoCache[ds];
       try {
         const r = await fetch('/api/note/read?path=' + encodeURIComponent('900 Journals & Reviews/910 Daily Notes/' + ds + '.md'));
         const data = await r.json();
-        if (!r.ok || !data.content) { document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">今日暂无日记<br><small>在对话中说"帮我记录今天要做的事"</small></div>'; return; }
-        const todos = data.content.split('\\n').filter(l => l.match(/^[-*] \[.\]/));
-        const pending = todos.filter(l => l.match(/^[-*] \[ \]/));
-        const done = todos.filter(l => l.match(/^[-*] \[x\]/i));
-        document.getElementById('todoList').innerHTML =
-          (pending.length ? '<div style="font-size:13px;color:var(--muted);margin-bottom:8px">⏳ 待完成 (' + pending.length + ')</div>' : '') +
-          pending.map(l => '<div class="todo-item"><div class="todo-check"></div><div class="todo-text">' + escapeHtml(l.replace(/^[-*] \[.\] /,'')) + '</div></div>').join('') +
-          (done.length ? '<div style="font-size:13px;color:var(--muted);margin:16px 0 8px">✅ 已完成 (' + done.length + ')</div>' : '') +
-          done.map(l => '<div class="todo-item"><div class="todo-check done"></div><div class="todo-text done">' + escapeHtml(l.replace(/^[-*] \[x\] /i,'')) + '</div></div>').join('');
-      } catch(e) { document.getElementById('todoList').innerHTML = '<div style="color:var(--bad);text-align:center;padding:40px">加载失败</div>'; }
+        todoCache[ds] = r.ok ? (data.content || '') : '';
+      } catch { todoCache[ds] = ''; }
+      return todoCache[ds];
     }
+    async function renderTodos() {
+      await selectParadigmByPath(TODO_TASK_PATH);
+      document.getElementById('todoTitle').textContent = '✅ 待办';
+      document.getElementById('todoDate').textContent = todoSelectedDate + ' ' + weekday(todoSelectedDate);
+      renderTodoChips();
+      document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">加载中...</div>';
+      const content = await loadTodoDate(todoSelectedDate);
+      const todos = content.split('\\n').filter(l => l.match(/^[-*] \[.\]/));
+      const pending = todos.filter(l => l.match(/^[-*] \[ \]/));
+      const done = todos.filter(l => l.match(/^[-*] \[x\]/i));
+      if (!todos.length) {
+        document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">这天暂无待办<br><small>' + todoSelectedDate + '</small></div>';
+        return;
+      }
+      document.getElementById('todoList').innerHTML =
+        (pending.length ? '<div style="font-size:13px;color:var(--muted);margin-bottom:8px">待完成 (' + pending.length + ')</div>' : '') +
+        pending.map(l => '<div class="todo-item"><div class="todo-check"></div><div class="todo-text">' + escapeHtml(l.replace(/^[-*] \[.\] /,'')) + '</div></div>').join('') +
+        (done.length ? '<div style="font-size:13px;color:var(--muted);margin:16px 0 8px">已完成 (' + done.length + ')</div>' : '') +
+        done.map(l => '<div class="todo-item"><div class="todo-check done"></div><div class="todo-text done">' + escapeHtml(l.replace(/^[-*] \[x\] /i,'')) + '</div></div>').join('');
+    }
+    async function renderSchedule() {
+      await selectParadigmByPath(SCHEDULE_TASK_PATH);
+      document.getElementById('todoTitle').textContent = '🗓️ 时刻表预览';
+      document.getElementById('todoDate').textContent = todoSelectedDate + ' 起 7 天';
+      renderTodoChips();
+      document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">加载中...</div>';
+      const key = todoSelectedDate + ':7';
+      if (!calendarCache[key]) {
+        const r = await fetch('/api/calendar?start=' + encodeURIComponent(todoSelectedDate) + '&days=7');
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || '加载失败');
+        calendarCache[key] = d.events || [];
+      }
+      const events = calendarCache[key];
+      if (!events.length) {
+        document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">这 7 天暂无日程</div>';
+        return;
+      }
+      let lastDate = '';
+      document.getElementById('todoList').innerHTML = events.map(ev => {
+        const head = ev.date !== lastDate ? '<div style="font-size:13px;color:var(--muted);margin:14px 0 8px">' + ev.date + ' ' + weekday(ev.date) + '</div>' : '';
+        lastDate = ev.date;
+        const time = ev.allDay ? '全天' : ((ev.startTime || '--:--') + (ev.endTime ? ' - ' + ev.endTime : ''));
+        const meta = [ev.location, ev.path].filter(Boolean).map(escapeHtml).join(' · ');
+        return head + '<div class="schedule-item"><div class="schedule-time">' + escapeHtml(time) + '</div><div class="schedule-title">' + escapeHtml(ev.title) + '</div>' + (meta ? '<div class="schedule-meta">' + meta + '</div>' : '') + '</div>';
+      }).join('');
+    }
+    async function showTodosPage(mode) {
+      if (!todoSelectedDate) todoSelectedDate = dateKey(new Date());
+      if (mode) todoMode = mode;
+      try {
+        if (todoMode === 'schedule') await renderSchedule();
+        else await renderTodos();
+      } catch(e) {
+        document.getElementById('todoList').innerHTML = '<div style="color:var(--bad);text-align:center;padding:40px">加载失败: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+    document.getElementById('todoPrev').addEventListener('click', () => { if (!todoSelectedDate) todoSelectedDate = dateKey(new Date()); todoSelectedDate = addDate(todoSelectedDate, -1); showTodosPage(); });
+    document.getElementById('todoToday').addEventListener('click', () => { todoSelectedDate = dateKey(new Date()); showTodosPage(); });
+    document.getElementById('todoNext').addEventListener('click', () => { if (!todoSelectedDate) todoSelectedDate = dateKey(new Date()); todoSelectedDate = addDate(todoSelectedDate, 1); showTodosPage(); });
+    document.getElementById('todoDayChips').addEventListener('click', e => {
+      const btn = e.target.closest('.todo-day-chip'); if (!btn) return;
+      todoSelectedDate = btn.dataset.date;
+      showTodosPage();
+    });
 
     // ── File upload ──
     let pendingFiles = [];
@@ -1417,25 +2074,48 @@ const html = `<!doctype html>
     uploadBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', async () => {
       filesLoading = true; uploadBtn.textContent = '⏳';
+      const newFiles = [];
       for (const f of fileInput.files) {
         const reader = new FileReader();
         await new Promise(resolve => {
           reader.onload = () => {
             const isImage = f.type.startsWith('image/');
-            pendingFiles.push({ name: f.name, type: f.type, data: reader.result, isImage });
+            const item = { name: f.name, type: f.type, data: reader.result, isImage };
+            pendingFiles.push(item);
+            newFiles.push(item);
             resolve();
           };
           reader.onerror = () => resolve(); // skip on error
-          const isBinary = f.type.startsWith('image/') || /\.xlsx?$/i.test(f.name) || f.type.includes('spreadsheet') || f.type.includes('excel');
-          if (isBinary) reader.readAsDataURL(f);
+          if (f.type.startsWith('image/')) reader.readAsDataURL(f);
+          else if (/\.xlsx?$/i.test(f.name)) reader.readAsDataURL(f); // Excel → base64 for server parsing
           else reader.readAsText(f);
         });
+      }
+      // Convert Excel files to CSV text server-side, then process as plain CSV.
+      for (const pf of newFiles) {
+        if (/\.xlsx?$/i.test(pf.name) && pf.data && !pf._parsed) {
+          try {
+            uploadBtn.textContent = '⏳'; toast('正在转换 CSV：' + pf.name);
+            const r = await fetch('/api/parse-file', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name: pf.name, data: pf.data})});
+            const d = await r.json();
+            if (r.ok && d.text) {
+              pf.name = d.csvName || pf.name.replace(/\.xlsx?$/i, '.csv');
+              pf.type = 'text/csv';
+              pf.data = d.text;
+              pf.isImage = false;
+              pf._parsed = true;
+              pf._sourceName = d.sourceName || pf.name;
+            }
+            else { pf.data = '[CSV转换失败] ' + (d.error || ''); pf.type = 'text/plain'; pf.isImage = false; pf._parsed = true; }
+          } catch(e) { pf.data = '[CSV转换失败] ' + e.message; pf.type = 'text/plain'; pf.isImage = false; }
+        }
       }
       filesLoading = false; fileInput.value = '';
       if (pendingFiles.length) {
         uploadBtn.textContent = '📎' + pendingFiles.length;
         uploadBtn.style.color = 'var(--accent-2)';
         uploadBtn.style.borderColor = 'rgba(100,210,193,.4)';
+        toast('已添加 ' + pendingFiles.length + ' 个文件');
       } else {
         uploadBtn.textContent = '📎'; toast('未能读取文件');
       }
@@ -1519,17 +2199,19 @@ const html = `<!doctype html>
         if (!r.ok) throw new Error('jobs fetch failed');
         for (const conv of running) {
           const job = d.jobs.find(j => j.id === conv._jobId);
-          if (!job) { conv.status = 'done'; conv.messages.push({role:'assistant',content:'[响应丢失 — 请重新发送]',time:nowStr()}); continue; }
-          if (job.status === 'done' || job.status === 'failed') {
+          if (!job) { appendAssistantOnce(conv, '[响应丢失 - 请重新发送]', {jobId: conv._jobId}); conv.status = 'done'; continue; }
+          applyJobProgress(conv, job);
+          if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') {
             conv.status = job.status;
             conv.updatedAt = nowStr();
-            if (job.status === 'done' && job.reply) conv.messages.push({role:'assistant',content:job.reply,time:job.finishedAt?.split(' ')[1]||nowStr()});
-            else if (job.status === 'failed') conv.messages.push({role:'assistant',content:'失败：'+(job.error||'未知错误'),time:nowStr()});
+            if (job.status === 'done' && job.reply) appendAssistantOnce(conv, formatRecoveredReply(job, job.reply), {jobId: job.id, time: job.finishedAt?.split(' ')[1]||nowStr(), ops: progressLogLines(job.progressLog)});
+            else if (job.status === 'failed') appendAssistantOnce(conv, formatRecoveredReply(job, '失败：'+(job.error||'未知错误')), {jobId: job.id, ops: progressLogLines(job.progressLog)});
+            else if (job.status === 'cancelled') appendAssistantOnce(conv, formatRecoveredReply(job, '[已取消]'), {jobId: job.id, ops: progressLogLines(job.progressLog)});
           }
         }
       } catch {
         // If jobs API fails, mark all running as lost
-        for (const conv of running) { conv.status = 'done'; conv.messages.push({role:'assistant',content:'[响应丢失 — 请重新发送]',time:nowStr()}); }
+        for (const conv of running) { appendAssistantOnce(conv, '[响应丢失 - 请重新发送]', {jobId: conv._jobId}); conv.status = 'done'; }
       }
     }
 
@@ -1549,16 +2231,25 @@ const html = `<!doctype html>
         for (const conv of running) {
           const job = d.jobs.find(j => j.id === conv._jobId);
           if (!job) continue;
+          applyJobProgress(conv, job);
           if (job.status === 'done' && job.reply) {
-            conv.messages.push({role:'assistant',content:job.reply,time:nowStr()});
+            appendAssistantOnce(conv, formatRecoveredReply(job, job.reply), {jobId: job.id, ops: progressLogLines(job.progressLog)});
             conv.status = 'done'; conv.updatedAt = nowStr();
             saveConversations(); renderConvList();
             if (conv.id === activeConvId) renderMessages(conv);
           } else if (job.status === 'failed') {
-            conv.messages.push({role:'assistant',content:'失败：'+(job.error||'未知错误'),time:nowStr()});
+            appendAssistantOnce(conv, formatRecoveredReply(job, '失败：'+(job.error||'未知错误')), {jobId: job.id, ops: progressLogLines(job.progressLog)});
             conv.status = 'failed'; conv.updatedAt = nowStr();
             saveConversations(); renderConvList();
             if (conv.id === activeConvId) renderMessages(conv);
+          } else if (job.status === 'cancelled') {
+            appendAssistantOnce(conv, formatRecoveredReply(job, '[已取消]'), {jobId: job.id, ops: progressLogLines(job.progressLog)});
+            conv.status = 'cancelled'; conv.updatedAt = nowStr();
+            saveConversations(); renderConvList();
+            if (conv.id === activeConvId) renderMessages(conv);
+          } else {
+            saveConversations(); renderConvList();
+            if (conv.id === activeConvId) updateRunningMessage(conv);
           }
         }
       } catch {}
@@ -1631,25 +2322,34 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/chat/stream' && req.method === 'POST') {
       const body = await readBody(req);
-      if (!body.message) throw new Error('message is required');
+      if (!hasMessageOrFiles(body)) throw new Error('message or files is required');
+      const message = String(body.message || '').trim() ? body.message : '请处理附件内容。';
       const task = body.taskPath ? { path: body.taskPath, content: body.taskContent || '' } : null;
       // Create persistent job so client can recover if disconnected
       const now = appNow();
       const job = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         status: 'running',
-        message: body.message,
+        message,
         task,
         model: normalizeModel(body.model),
-        reply: '',
-        error: '',
+    reply: '',
+    partialReply: '',
+    error: '',
         createdAt: `${now.date} ${now.time}`,
         startedAt: `${now.date} ${now.time}`,
         finishedAt: '',
+        stage: 'starting',
+        progressText: '已接收任务',
+        progressUpdatedAt: `${now.date} ${now.time}`,
+        toolName: '',
+        round: 0,
+        progressLog: [{ time: `${now.date} ${now.time}`, stage: 'starting', text: '已接收任务', toolName: '', round: 0 }],
         _aborted: false,
       };
       jobs.unshift(job);
       trimJobs();
+      appendJobLog(job, 'started');
       const jobRef = job;
 
       res.writeHead(200, {
@@ -1658,37 +2358,57 @@ const server = http.createServer(async (req, res) => {
         Connection: 'keep-alive',
         'X-Accel-Buffering': 'no',
       });
-      sseWrite(res, 'meta', { jobId: jobRef.id, model: normalizeModel(body.model) });
+      sseWrite(res, 'meta', { jobId: jobRef.id, model: normalizeModel(body.model), stage: jobRef.stage, progressText: jobRef.progressText, progressUpdatedAt: jobRef.progressUpdatedAt, progressLog: jobRef.progressLog });
 
+      const heartbeat = setInterval(() => {
+        if (!sseWrite(res, 'ping', { now: Date.now() })) {
+          jobRef._disconnected = true;
+          clearInterval(heartbeat);
+        }
+      }, 15000);
       req.on('close', () => { jobRef._disconnected = true; });
+      res.on('close', () => { jobRef._disconnected = true; clearInterval(heartbeat); });
 
       try {
-        await runClaudeStreaming(body.message, task, body.model, res, jobRef, body.history, body.files);
+        await runClaudeStreaming(message, task, body.model, res, jobRef, body.history, body.files);
         jobRef.status = 'done';
+        setJobProgress(jobRef, 'done', '任务完成');
+        appendJobLog(jobRef, 'done');
         const finished = appNow();
         jobRef.finishedAt = `${finished.date} ${finished.time}`;
       } catch (err) {
         if (!jobRef._aborted) {
           jobRef.status = 'failed';
           jobRef.error = err.message || String(err);
+          setJobProgress(jobRef, 'error', jobRef.error || '任务失败');
+          appendJobLog(jobRef, 'failed');
           const finished = appNow();
           jobRef.finishedAt = `${finished.date} ${finished.time}`;
           sseWrite(res, 'error', { message: err.message || String(err) });
         }
+      } finally {
+        clearInterval(heartbeat);
       }
-      res.end();
+      sseEnd(res);
       return;
     }
     if (url.pathname === '/api/chat' && req.method === 'POST') {
       const body = await readBody(req);
-      if (!body.message) throw new Error('message is required');
+      if (!hasMessageOrFiles(body)) throw new Error('message or files is required');
+      const message = String(body.message || '').trim() ? body.message : '请处理附件内容。';
       const task = body.taskPath ? { path: body.taskPath, content: body.taskContent || '' } : null;
-      const job = enqueueJob({ message: body.message, task, model: body.model, history: body.history, files: body.files });
+      const job = enqueueJob({ message, task, model: body.model, history: body.history, files: body.files });
       json(res, 202, { job: serializeJob(job) });
       return;
     }
     if (url.pathname === '/api/jobs' && req.method === 'GET') {
       json(res, 200, { activeJob: activeJob ? activeJob.id : null, jobs: jobs.map(serializeJob) });
+      return;
+    }
+    if (url.pathname === '/api/job/logs' && req.method === 'GET') {
+      const id = url.searchParams.get('id') || '';
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '200', 10) || 200, 1000);
+      json(res, 200, { path: JOB_LOG_PATH, logs: readJobLogs({ id, limit }) });
       return;
     }
     if (url.pathname === '/api/job/cancel' && req.method === 'POST') {
@@ -1699,6 +2419,8 @@ const server = http.createServer(async (req, res) => {
         target._aborted = true;
         target.status = 'cancelled';
         target.error = '用户取消';
+        setJobProgress(target, 'cancelled', '已取消');
+        appendJobLog(target, 'cancelled');
         const finished = appNow();
         target.finishedAt = `${finished.date} ${finished.time}`;
         if (target === activeJob) activeJob = null;
@@ -1783,6 +2505,78 @@ const server = http.createServer(async (req, res) => {
         } catch {}
       }
       json(res, 200, { month, headers, rows: allRows, fileCount: files.length });
+      return;
+    }
+    if (url.pathname === '/api/calendar' && req.method === 'GET') {
+      const start = url.searchParams.get('start') || appNow().date;
+      const days = Math.min(Math.max(parseInt(url.searchParams.get('days') || '7', 10) || 7, 1), 31);
+      if (!start.match(/^\d{4}-\d{2}-\d{2}$/)) throw new Error('invalid start format (YYYY-MM-DD)');
+      const end = addDateDays(start, days - 1);
+      const prefix = '900 Journals & Reviews/Calender/';
+      const byPath = new Map();
+      for (const monthKey of monthKeysBetween(start, end)) {
+        let page = 1;
+        while (page <= 10) {
+          const listData = unwrap(await fnsRequest('/api/notes', { params: { vault: DEFAULT_VAULT, keyword: monthKey, searchContent: false, page } }));
+          const list = Array.isArray(listData) ? listData : (listData?.list || []);
+          for (const note of list) {
+            const p = String(note.path || '');
+            const dateFromPath = (p.match(/\/(\d{4}-\d{2}-\d{2})[^/]*\.md$/) || [])[1] || '';
+            if (p.startsWith(prefix) && dateFromPath >= start && dateFromPath <= end) byPath.set(p, note);
+          }
+          const pager = listData?.pager || {};
+          const totalRows = Number(pager.totalRows || list.length || 0);
+          const pageSize = Number(pager.pageSize || list.length || 10);
+          if (!list.length || page * pageSize >= totalRows) break;
+          page++;
+        }
+      }
+      const events = [];
+      for (const [eventPath] of byPath) {
+        const dateFromPath = (eventPath.match(/\/(\d{4}-\d{2}-\d{2})\s+([^/]+)\.md$/) || [])[1] || '';
+        const titleFromPath = (eventPath.match(/\/\d{4}-\d{2}-\d{2}\s+([^/]+)\.md$/) || [])[1] || eventPath.split('/').pop().replace(/\.md$/i, '');
+        try {
+          const noteData = unwrap(await fnsRequest('/api/note', { params: { vault: DEFAULT_VAULT, path: eventPath } }));
+          const content = noteData?.content || '';
+          const fm = parseFrontmatter(content);
+          const date = String(fm.date || dateFromPath || '').slice(0, 10);
+          if (!date || date < start || date > end) continue;
+          events.push({
+            path: eventPath,
+            title: String(fm.title || titleFromPath),
+            date,
+            allDay: fm.allDay === true || fm.allDay === 'true',
+            startTime: fm.startTime || '',
+            endTime: fm.endTime || '',
+            location: fm.location || '',
+            completed: fm.completed || null,
+          });
+        } catch {
+          if (dateFromPath) events.push({ path: eventPath, title: titleFromPath, date: dateFromPath, allDay: true, startTime: '', endTime: '', location: '', completed: null });
+        }
+      }
+      events.sort((a, b) => (a.date + ' ' + (a.startTime || '99:99') + ' ' + a.title).localeCompare(b.date + ' ' + (b.startTime || '99:99') + ' ' + b.title, 'zh-CN'));
+      json(res, 200, { start, end, days, events });
+      return;
+    }
+    if (url.pathname === '/api/parse-file' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!body.data || !body.name) throw new Error('data and name are required');
+      const isExcel = /\.xlsx?$/i.test(body.name);
+      if (!isExcel) throw new Error('unsupported file type');
+      try {
+        const b64 = body.data.includes('base64,') ? body.data.split('base64,')[1] : body.data;
+        const buf = Buffer.from(b64, 'base64');
+        const wb = XLSX.read(buf, { type: 'buffer' });
+        const csvName = String(body.name).replace(/\.xlsx?$/i, '.csv');
+        const sheets = wb.SheetNames.map(name => {
+          const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name], { blankrows: false });
+          return wb.SheetNames.length > 1 ? '# Sheet: ' + name + '\n' + csv : csv;
+        }).join('\n\n');
+        json(res, 200, { ok: true, text: sheets, csvName, sourceName: body.name, type: 'text/csv', sheets: wb.SheetNames.length, rows: sheets.split('\n').filter(l=>l.trim() && !l.startsWith('# Sheet:')).length });
+      } catch (e) {
+        json(res, 500, { error: 'Excel 转 CSV 失败: ' + e.message });
+      }
       return;
     }
     if (url.pathname === '/api/note/read' && req.method === 'GET') {
