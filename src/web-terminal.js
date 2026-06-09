@@ -546,6 +546,7 @@ function shouldSkipRepoPath(name) {
   return [
     '.git', 'node_modules', '__pycache__', '.venv', 'venv', 'dist', 'build', 'coverage',
     '.next', '.cache', 'package-lock.json', 'web.log', 'job-events.log', 'repo-knowledge-graph.json',
+    'local.config.sh', 'task-indexes', 'task-index-bindings.json',
   ].includes(name);
 }
 
@@ -1992,6 +1993,10 @@ const html = `<!doctype html>
     .settings-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
     .settings-actions .chip{height:32px}
     .settings-meta{font-size:12px;color:var(--muted);line-height:1.55;margin-top:8px;overflow-wrap:anywhere}
+    .page-default-list{display:flex;flex-direction:column;gap:8px}
+    .page-default-row{display:grid;grid-template-columns:64px minmax(0,1.4fr) minmax(0,.8fr) minmax(0,.8fr) minmax(0,.8fr);gap:6px;align-items:center}
+    .page-default-name{font-size:12px;color:var(--muted);font-weight:800}
+    .page-default-row select{height:34px;border-radius:8px;font-size:12px;padding:0 8px}
     .schedule-item{border:1px solid var(--line);background:rgba(255,255,255,.03);border-radius:8px;padding:10px 12px;margin-bottom:8px}
     .schedule-time{font-size:12px;color:var(--accent-2);font-weight:750;margin-bottom:4px}
     .schedule-title{font-size:14px;font-weight:750}
@@ -2033,6 +2038,8 @@ const html = `<!doctype html>
       .paradigm-row select{max-width:100%;font-size:13px;height:34px;padding:0 10px}
       .slot{min-height:34px;font-size:11px;padding:4px 6px}
       .chip{height:34px;font-size:13px;padding:0 10px}
+      .page-default-row{grid-template-columns:1fr 1fr;gap:6px}
+      .page-default-name{grid-column:1 / -1}
       .model-btn{height:26px;font-size:11px;padding:0 8px}
       .bar{grid-template-columns:1fr}
       #send{width:100%;height:46px}
@@ -2177,6 +2184,14 @@ const html = `<!doctype html>
             </div>
           </div>
           <div class="settings-section">
+            <div class="settings-section-title">页面输入默认行为</div>
+            <div class="page-default-list" id="pageDefaultSettings"></div>
+            <div class="settings-actions">
+              <button id="settingsSavePageDefaults" class="chip" type="button">保存默认行为</button>
+            </div>
+            <div class="settings-meta">账单 / Inbox / 待办 / 时刻表会在进入页面或从页面输入框发起任务前套用这里的提示词、模型、快捷和单轮设置。</div>
+          </div>
+          <div class="settings-section">
             <div class="settings-section-title">任务索引目录绑定</div>
             <div class="settings-grid">
               <div class="settings-label">AI 任务</div>
@@ -2263,15 +2278,24 @@ const html = `<!doctype html>
     let activeConvId = null;
     let singleTurn = false;
     let fastMode = false;
+    let autoFollowChat = true;
     let streamingAbort = null;
     let toastTimer = null;
     const TODO_TASK_PATH = '000 PARA/020 Areas/AI任务/要做的事情记录.md';
     const SCHEDULE_TASK_PATH = '000 PARA/020 Areas/AI任务/按照格式建立日程.md';
+    const SCHEDULE_VISIBLE_DAYS = 30;
     const INBOX_PATH = ${JSON.stringify(INBOX_PATH)};
     const INBOX_PREFIX = ${JSON.stringify(INBOX_PREFIX)};
     let settingsTasks = [];
     let taskIndexBindings = {};
     let dirSuggestionsLoaded = false;
+    const PAGE_DEFAULTS_KEY = 'claudenotes_pageDefaults';
+    const PAGE_DEFAULT_PAGES = [
+      { key: 'bills', label: '账单' },
+      { key: 'inbox', label: 'Inbox' },
+      { key: 'todos', label: '待办' },
+      { key: 'schedule', label: '时刻表' },
+    ];
     let todoMode = 'todos';
     let todoSelectedDate = '';
     let todoEditing = false;
@@ -2380,6 +2404,44 @@ const html = `<!doctype html>
     }
     function fastestModel() {
       return availableModels.find(m => /flash|fast|lite/i.test(m)) || currentModel;
+    }
+    function modelLabel(model) {
+      return String(model || '').includes('flash') ? 'Flash' : 'Pro';
+    }
+    function pageDefaultTaskPath(pageKey, fallback) {
+      return (loadPageDefaults()[pageKey] || {}).taskPath || fallback;
+    }
+    function loadPageDefaults() {
+      try {
+        const data = JSON.parse(localStorage.getItem(PAGE_DEFAULTS_KEY) || '{}');
+        return data && typeof data === 'object' ? data : {};
+      } catch { return {}; }
+    }
+    function savePageDefaults(data) {
+      try { localStorage.setItem(PAGE_DEFAULTS_KEY, JSON.stringify(data || {})); } catch {}
+    }
+    function setFastModeValue(value, persist) {
+      fastMode = Boolean(value);
+      fastModeBtn.classList.toggle('on', fastMode);
+      if (persist) { try { localStorage.setItem('claudenotes_fastMode', fastMode ? '1' : '0'); } catch {} }
+    }
+    function setSingleTurnValue(value, persist) {
+      singleTurn = Boolean(value);
+      singleTurnBtn.classList.toggle('on', singleTurn);
+      if (persist) { try { localStorage.setItem('claudenotes_singleTurn', singleTurn ? '1' : '0'); } catch {} }
+    }
+    function setModelValue(model, persist) {
+      if (!model || !availableModels.includes(model)) return;
+      currentModel = model;
+      modelBtn.textContent = modelLabel(currentModel);
+      if (persist) { try { localStorage.setItem('claudenotes_model', currentModel); } catch {} }
+    }
+    async function applyPageDefaults(pageKey) {
+      const cfg = loadPageDefaults()[pageKey] || {};
+      if (cfg.taskPath) await selectParadigmByPath(cfg.taskPath);
+      if (cfg.model && cfg.model !== 'keep') setModelValue(cfg.model, true);
+      if (cfg.fastMode && cfg.fastMode !== 'keep') setFastModeValue(cfg.fastMode === 'on', true);
+      if (cfg.singleTurn && cfg.singleTurn !== 'keep') setSingleTurnValue(cfg.singleTurn === 'on', true);
     }
     function progressLogLines(log) {
       if (!Array.isArray(log) || !log.length) return [];
@@ -2582,7 +2644,18 @@ const html = `<!doctype html>
         if (el) el.scrollLeft = 0;
       });
     }
-    function scrollToBottom() {
+    function isChatNearBottom() {
+      const el = mainPanel || chatPage;
+      if (!el) return true;
+      return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    }
+    function scrollToBottom(force) {
+      const shouldFollow = force === true || autoFollowChat || isChatNearBottom();
+      if (!shouldFollow) {
+        resetHorizontalScroll();
+        scrollHint.classList.add('visible');
+        return;
+      }
       [mainPanel, chatPage].forEach(el => {
         if (!el) return;
         el.scrollTop = el.scrollHeight;
@@ -2590,6 +2663,7 @@ const html = `<!doctype html>
       });
       resetHorizontalScroll();
       requestAnimationFrame(resetHorizontalScroll);
+      autoFollowChat = true;
       scrollHint.classList.remove('visible');
     }
 
@@ -2598,7 +2672,8 @@ const html = `<!doctype html>
       const div = document.createElement('div');
       div.className = 'msg assistant';
       div.innerHTML = '<div class="meta">Claude · ' + nowStr() + '</div>' + progressMarkup('准备中') + '<span class="stream-text"></span><span class="typing-dots stream-dots"><span>.</span><span>.</span><span>.</span></span>';
-      thread.appendChild(div); scrollToBottom();
+      const follow = isChatNearBottom();
+      thread.appendChild(div); scrollToBottom(follow);
       const textEl = div.querySelector('.stream-text');
       let dotsEl = div.querySelector('.stream-dots');
       let progressEl = div.querySelector('.progress-text');
@@ -2787,7 +2862,7 @@ const html = `<!doctype html>
           }
         }
       } finally {
-        send.disabled = false; input.focus(); streamingAbort = null;
+        send.disabled = false; input.blur(); streamingAbort = null;
         saveConversations(); renderConvList();
         if (conv.status === 'done' && singleTurn) { activeConvId = null; }
       }
@@ -2805,7 +2880,12 @@ const html = `<!doctype html>
     thread.addEventListener('click', e => {
       if (e.target.closest('.inline-cancel')) cancelCurrentTask();
     });
-    scrollHint.addEventListener('click', () => { scrollToBottom(); });
+    mainPanel.addEventListener('scroll', () => {
+      if (currentPage !== 'chat') return;
+      autoFollowChat = isChatNearBottom();
+      scrollHint.classList.toggle('visible', !autoFollowChat);
+    }, {passive:true});
+    scrollHint.addEventListener('click', () => { autoFollowChat = true; scrollToBottom(true); });
     convToggle.addEventListener('click', toggleSidebar);
     sidebarBackdrop.addEventListener('click', closeSidebar);
     // Swipe: right edge → open sidebar, left swipe on sidebar → close
@@ -2894,7 +2974,7 @@ const html = `<!doctype html>
       if (tabPages[currentPage]) tabPages[currentPage]();
     });
 
-    function showChatPage() { scrollToBottom(); }
+    function showChatPage() { scrollToBottom(true); }
     let billYear, billMonth, billCache = {};
     async function loadBills(year, mon) {
       const key = year + '-' + mon;
@@ -2986,6 +3066,7 @@ const html = `<!doctype html>
       updateBillView();
     }
     async function showBillsPage() {
+      await applyPageDefaults('bills');
       const d = new Date();
       if (!billYear) { billYear = d.getFullYear(); billMonth = String(d.getMonth()+1).padStart(2,'0'); }
       loadBills(billYear, billMonth);
@@ -3137,7 +3218,7 @@ const html = `<!doctype html>
       create.style.display = isSchedule ? '' : 'none';
     }
     async function renderTodos() {
-      await selectParadigmByPath(TODO_TASK_PATH);
+      await selectParadigmByPath(pageDefaultTaskPath('todos', TODO_TASK_PATH));
       document.getElementById('todoTitle').textContent = '📄 日记';
       document.getElementById('todoDate').textContent = todoSelectedDate + ' ' + weekday(todoSelectedDate);
       const railDays = renderTodoChips();
@@ -3157,17 +3238,17 @@ const html = `<!doctype html>
       hydrateTodoDayDots(railDays);
     }
     async function renderSchedule() {
-      await selectParadigmByPath(SCHEDULE_TASK_PATH);
+      await selectParadigmByPath(pageDefaultTaskPath('schedule', SCHEDULE_TASK_PATH));
       document.getElementById('todoTitle').textContent = '🗓️ 时刻表预览';
-      document.getElementById('todoDate').textContent = todoSelectedDate + ' 起 7 天';
+      document.getElementById('todoDate').textContent = todoSelectedDate + ' 起 ' + SCHEDULE_VISIBLE_DAYS + ' 天';
       renderTodoChips();
       todoEditing = false;
       setTodoControls('schedule');
       document.getElementById('todoList').innerHTML = '<div style="color:var(--muted);text-align:center;padding:40px">加载中...</div>';
       const createBox = '<div class="schedule-create"><textarea id="scheduleQuickInput" placeholder="输入日程" rows="1"></textarea><button id="scheduleQuickSend" type="button">建立</button></div>';
-      const key = todoSelectedDate + ':7';
+      const key = todoSelectedDate + ':' + SCHEDULE_VISIBLE_DAYS;
       if (!calendarCache[key]) {
-        const r = await fetch('/api/calendar?start=' + encodeURIComponent(todoSelectedDate) + '&days=7');
+        const r = await fetch('/api/calendar?start=' + encodeURIComponent(todoSelectedDate) + '&days=' + SCHEDULE_VISIBLE_DAYS);
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || '加载失败');
         calendarCache[key] = d.events || [];
@@ -3177,7 +3258,7 @@ const html = `<!doctype html>
       events.forEach(ev => { todoDayDotCounts[ev.date] = (todoDayDotCounts[ev.date] || 0) + 1; });
       renderTodoChips();
       if (!events.length) {
-        document.getElementById('todoList').innerHTML = createBox + '<div style="color:var(--muted);text-align:center;padding:40px">这 7 天暂无日程</div>';
+        document.getElementById('todoList').innerHTML = createBox + '<div style="color:var(--muted);text-align:center;padding:40px">这 ' + SCHEDULE_VISIBLE_DAYS + ' 天暂无日程</div>';
         bindScheduleQuickCreate();
         return;
       }
@@ -3199,7 +3280,8 @@ const html = `<!doctype html>
       btn.addEventListener('click', async () => {
         const text = box.value.trim();
         if (!text) return;
-        await selectParadigmByPath(SCHEDULE_TASK_PATH);
+        await applyPageDefaults('schedule');
+        if (!paradigmSelect.value) await selectParadigmByPath(SCHEDULE_TASK_PATH);
         activatePage('chat');
         submit(text);
       });
@@ -3208,8 +3290,8 @@ const html = `<!doctype html>
       if (!todoSelectedDate) todoSelectedDate = dateKey(new Date());
       if (mode) { todoMode = mode; todoEditing = false; }
       try {
-        if (todoMode === 'schedule') await renderSchedule();
-        else await renderTodos();
+        if (todoMode === 'schedule') { await applyPageDefaults('schedule'); await renderSchedule(); }
+        else { await applyPageDefaults('todos'); await renderTodos(); }
       } catch(e) {
         document.getElementById('todoList').innerHTML = '<div style="color:var(--bad);text-align:center;padding:40px">加载失败: ' + escapeHtml(e.message) + '</div>';
       }
@@ -3221,7 +3303,7 @@ const html = `<!doctype html>
       if (!todoSelectedDate) todoSelectedDate = dateKey(new Date());
       todoEditing = false;
       if (todoMode === 'schedule') {
-        delete calendarCache[todoSelectedDate + ':7'];
+        delete calendarCache[todoSelectedDate + ':' + SCHEDULE_VISIBLE_DAYS];
         showTodosPage('schedule');
         return;
       }
@@ -3302,7 +3384,8 @@ const html = `<!doctype html>
     document.getElementById('scheduleCreate').addEventListener('click', async () => {
       const box = document.getElementById('scheduleQuickInput');
       if (box) { box.focus(); return; }
-      await selectParadigmByPath(SCHEDULE_TASK_PATH);
+      await applyPageDefaults('schedule');
+      if (!paradigmSelect.value) await selectParadigmByPath(SCHEDULE_TASK_PATH);
       activatePage('chat');
       input.focus();
     });
@@ -3383,7 +3466,7 @@ const html = `<!doctype html>
       }).join('');
     }
     async function showInboxPage() {
-      try { await renderInbox(); }
+      try { await applyPageDefaults('inbox'); await renderInbox(); }
       catch(e) { document.getElementById('inboxList').innerHTML = '<div style="color:var(--bad);text-align:center;padding:40px">加载失败: ' + escapeHtml(e.message) + '</div>'; }
     }
     document.getElementById('inboxRefresh').addEventListener('click', async () => { inboxEditing = false; inboxItems = []; await showInboxPage(); });
@@ -3563,6 +3646,42 @@ const html = `<!doctype html>
       select.innerHTML = settingsTasks.map(t => '<option value="' + t.path.replace(/"/g,'&quot;') + '">' + escapeHtml(t.name) + '</option>').join('');
       if (current && select.querySelector('option[value="' + current.replace(/"/g,'&quot;') + '"]')) select.value = current;
     }
+    function pageTaskOptions(selected) {
+      return '<option value="">保持当前提示词</option>' + settingsTasks.map(t => '<option value="' + t.path.replace(/"/g,'&quot;') + '"' + (selected === t.path ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>').join('');
+    }
+    function modelOptions(selected) {
+      return '<option value="keep">保持当前模型</option>' + availableModels.map(m => '<option value="' + m.replace(/"/g,'&quot;') + '"' + (selected === m ? ' selected' : '') + '>' + escapeHtml(modelLabel(m)) + '</option>').join('');
+    }
+    function modeOptions(selected) {
+      return '<option value="keep">保持</option><option value="on"' + (selected === 'on' ? ' selected' : '') + '>开启</option><option value="off"' + (selected === 'off' ? ' selected' : '') + '>关闭</option>';
+    }
+    function renderPageDefaultSettings() {
+      const box = document.getElementById('pageDefaultSettings');
+      if (!box) return;
+      const defaults = loadPageDefaults();
+      box.innerHTML = PAGE_DEFAULT_PAGES.map(page => {
+        const cfg = defaults[page.key] || {};
+        return '<div class="page-default-row" data-page-default="' + page.key + '">' +
+          '<div class="page-default-name">' + page.label + '</div>' +
+          '<select class="settings-input page-default-task">' + pageTaskOptions(cfg.taskPath || '') + '</select>' +
+          '<select class="settings-input page-default-model">' + modelOptions(cfg.model || 'keep') + '</select>' +
+          '<select class="settings-input page-default-fast">' + modeOptions(cfg.fastMode || 'keep') + '</select>' +
+          '<select class="settings-input page-default-single">' + modeOptions(cfg.singleTurn || 'keep') + '</select>' +
+        '</div>';
+      }).join('');
+    }
+    function collectPageDefaultSettings() {
+      const out = {};
+      document.querySelectorAll('[data-page-default]').forEach(row => {
+        out[row.dataset.pageDefault] = {
+          taskPath: row.querySelector('.page-default-task')?.value || '',
+          model: row.querySelector('.page-default-model')?.value || 'keep',
+          fastMode: row.querySelector('.page-default-fast')?.value || 'keep',
+          singleTurn: row.querySelector('.page-default-single')?.value || 'keep',
+        };
+      });
+      return out;
+    }
     function renderBoundDirs() {
       const taskPath = currentSettingsTaskPath();
       const dirs = Array.isArray(taskIndexBindings[taskPath]) ? taskIndexBindings[taskPath] : [];
@@ -3574,8 +3693,10 @@ const html = `<!doctype html>
     async function showSettingsPage() {
       try {
         renderSettingsTasks();
+        renderPageDefaultSettings();
         await Promise.all([loadTaskIndexBindings(), loadDirSuggestions(false)]);
         renderSettingsTasks();
+        renderPageDefaultSettings();
         renderBoundDirs();
         const savedTheme = (() => { try { return localStorage.getItem('claudenotes_theme') || 'dark'; } catch { return 'dark'; } })();
         applyTheme(savedTheme);
@@ -3634,6 +3755,10 @@ const html = `<!doctype html>
     });
     document.getElementById('settingsTaskSelect').addEventListener('change', () => {
       renderBoundDirs();
+    });
+    document.getElementById('settingsSavePageDefaults').addEventListener('click', () => {
+      savePageDefaults(collectPageDefaultSettings());
+      toast('页面默认行为已保存');
     });
     document.getElementById('settingsAddDir').addEventListener('click', () => {
       const inputEl = document.getElementById('settingsDirInput');
@@ -3738,22 +3863,16 @@ const html = `<!doctype html>
 
     // ── Single turn ──
     singleTurnBtn.addEventListener('click', () => {
-      singleTurn = !singleTurn;
-      singleTurnBtn.classList.toggle('on', singleTurn);
-      try { localStorage.setItem('claudenotes_singleTurn', singleTurn ? '1' : '0'); } catch {}
+      setSingleTurnValue(!singleTurn, true);
       toast(singleTurn ? '单轮模式：每次新建对话' : '连续模式：在同一对话中继续');
     });
     fastModeBtn.addEventListener('click', () => {
-      fastMode = !fastMode;
-      fastModeBtn.classList.toggle('on', fastMode);
-      try { localStorage.setItem('claudenotes_fastMode', fastMode ? '1' : '0'); } catch {}
+      setFastModeValue(!fastMode, true);
       toast(fastMode ? '快捷模式：少历史、优先快速模型' : '已关闭快捷模式');
     });
     modelBtn.addEventListener('click', () => {
       const idx = availableModels.indexOf(currentModel);
-      currentModel = availableModels[(idx + 1) % availableModels.length] || currentModel;
-      modelBtn.textContent = currentModel.includes('flash') ? 'Flash' : 'Pro';
-      try { localStorage.setItem('claudenotes_model', currentModel); } catch {}
+      setModelValue(availableModels[(idx + 1) % availableModels.length] || currentModel, true);
     });
 
     // ── Clear history ──
@@ -3778,7 +3897,7 @@ const html = `<!doctype html>
       availableModels = d.models;
       const saved = (() => { try { return localStorage.getItem('claudenotes_model'); } catch { return null; } })();
       currentModel = (saved && d.models.includes(saved)) ? saved : d.defaultModel;
-      modelBtn.textContent = currentModel.includes('flash') ? 'Flash' : 'Pro';
+      modelBtn.textContent = modelLabel(currentModel);
     }
     async function loadParadigms() {
       const r = await fetch('/api/tasks'); const d = await r.json();
@@ -3841,10 +3960,10 @@ const html = `<!doctype html>
     // ── Restore button states ──
     try {
       if (localStorage.getItem('claudenotes_singleTurn') === '1') {
-        singleTurn = true; singleTurnBtn.classList.add('on');
+        setSingleTurnValue(true, false);
       }
       if (localStorage.getItem('claudenotes_fastMode') === '1') {
-        fastMode = true; fastModeBtn.classList.add('on');
+        setFastModeValue(true, false);
       }
       applyTheme(localStorage.getItem('claudenotes_theme') || 'dark');
     } catch {}
@@ -3887,7 +4006,7 @@ const html = `<!doctype html>
     // Show saved model immediately (will be confirmed by loadConfig)
     try {
       const sm = localStorage.getItem('claudenotes_model');
-      if (sm) { currentModel = sm; modelBtn.textContent = sm.includes('flash') ? 'Flash' : 'Pro'; }
+      if (sm) { currentModel = sm; modelBtn.textContent = modelLabel(sm); }
     } catch {}
     loadConversations();
     renderConvList();
