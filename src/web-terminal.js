@@ -1890,19 +1890,19 @@ const html = `<!doctype html>
     .typing-dots span:nth-child(3){animation-delay:.4s}
     @keyframes dotPulse{0%,60%{opacity:.2}30%{opacity:1}}
     .tool-note{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
-    form{width:100%;max-width:100vw;min-width:0;z-index:2;padding:10px max(12px,env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-right));border-top:1px solid rgba(255,255,255,.04);background:var(--bar-bg);backdrop-filter:blur(24px) saturate(120%);box-shadow:0 -8px 32px rgba(0,0,0,.3);overflow-x:hidden}
+    form{width:100%;max-width:100vw;min-width:0;z-index:2;padding:6px max(12px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));border-top:1px solid rgba(255,255,255,.04);background:var(--bar-bg);backdrop-filter:blur(24px) saturate(120%);box-shadow:0 -8px 32px rgba(0,0,0,.3);overflow-x:hidden}
     .bar{width:100%;max-width:880px;min-width:0;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
-    textarea{width:100%;min-height:54px;max-height:160px;resize:none;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(17,22,21,.8);color:var(--text);padding:12px 14px;outline:none;font:inherit;line-height:1.45;transition:border-color .2s,box-shadow .2s;backdrop-filter:blur(4px)}
+    textarea{width:100%;min-height:38px;height:38px;max-height:118px;resize:none;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(17,22,21,.8);color:var(--text);padding:8px 12px;outline:none;font:inherit;line-height:1.35;transition:border-color .2s,box-shadow .2s,height .12s;backdrop-filter:blur(4px)}
     .char-count{font-size:11px;color:var(--muted);text-align:right;grid-column:1 / -1;margin-top:2px}
-    button{height:56px;min-width:80px;border:0;border-radius:10px;background:linear-gradient(135deg,var(--accent-2),var(--accent));color:#0a0f0e;font-weight:800;font:inherit;font-size:15px;cursor:pointer;transition:all .2s}
+    button{height:42px;min-width:72px;border:0;border-radius:10px;background:linear-gradient(135deg,var(--accent-2),var(--accent));color:#0a0f0e;font-weight:800;font:inherit;font-size:14px;cursor:pointer;transition:all .2s}
     button:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 6px 20px rgba(100,210,193,.3)}
     button:active{transform:translateY(0) scale(.97)}
     button:disabled{opacity:.4;transform:none;box-shadow:none;filter:none}
     button:disabled{opacity:.45}
     .paradigm-row{width:100%;max-width:880px;min-width:0;margin:0 auto 4px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}
-    .paradigm-row select{width:100%;min-width:0;max-width:none;height:36px;font-size:14px;border-radius:999px;padding:0 12px}
+    .paradigm-row select{width:100%;min-width:0;max-width:none;height:30px;font-size:12px;border-radius:999px;padding:0 10px}
     .input-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
-    .chip{height:36px;min-width:0;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--muted);border-radius:999px;padding:0 12px;font-size:13px;white-space:nowrap;font-weight:650;cursor:pointer;transition:all .2s}
+    .chip{height:30px;min-width:0;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--muted);border-radius:999px;padding:0 10px;font-size:12px;white-space:nowrap;font-weight:650;cursor:pointer;transition:all .2s}
     .chip:hover{border-color:rgba(255,255,255,.15);color:var(--text)}
     .chip.on{color:var(--accent-2);border-color:rgba(100,210,193,.4);background:rgba(100,210,193,.12);box-shadow:0 0 12px rgba(100,210,193,.15);animation:chipOn .3s ease-out}
     @keyframes chipOn{0%{box-shadow:0 0 0 rgba(100,210,193,.4);background:rgba(100,210,193,.25)}100%{box-shadow:0 0 12px rgba(100,210,193,.15);background:rgba(100,210,193,.12)}}
@@ -1939,7 +1939,12 @@ const html = `<!doctype html>
     .todo-text.done{text-decoration:line-through;color:var(--muted)}
     .todo-toolbar{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
     .todo-toolbar .chip{height:30px;font-size:12px;padding:0 10px}
-    .slot-row{grid-column:1 / -1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));justify-content:stretch;gap:6px;margin-top:2px;min-width:0;width:100%}
+    .slot-toggle{position:fixed;right:0;top:62dvh;z-index:20;width:28px;min-width:28px;height:42px;padding:0;border:1px solid var(--line);border-right:0;border-radius:10px 0 0 10px;background:var(--bar-bg);backdrop-filter:blur(18px);color:var(--accent-2);box-shadow:0 6px 22px rgba(0,0,0,.32);font-size:14px;line-height:1}
+    .slot-toggle:hover{filter:none;transform:none;box-shadow:none;border-color:rgba(100,210,193,.45)}
+    .slot-toggle.open{background:rgba(100,210,193,.1);border-color:rgba(100,210,193,.45)}
+    .slot-wrap{position:fixed;right:34px;top:calc(62dvh - 8px);z-index:19;width:min(560px,calc(100vw - 52px));display:none;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--bar-bg);backdrop-filter:blur(18px);box-shadow:0 8px 28px rgba(0,0,0,.34)}
+    .slot-wrap.open{display:block}
+    .slot-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));justify-content:stretch;gap:6px;min-width:0;width:100%}
     .slot-row::-webkit-scrollbar{display:none}
     .todo-rail-wrap{position:relative;margin:-2px 0 8px;padding-top:7px}
     .todo-rail-arrow{position:absolute;left:50%;top:0;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid var(--accent-2);transform:translateX(-50%);filter:drop-shadow(0 0 5px rgba(100,210,193,.45));pointer-events:none;z-index:1}
@@ -1994,9 +1999,15 @@ const html = `<!doctype html>
     .settings-actions .chip{height:32px}
     .settings-meta{font-size:12px;color:var(--muted);line-height:1.55;margin-top:8px;overflow-wrap:anywhere}
     .page-default-list{display:flex;flex-direction:column;gap:8px}
-    .page-default-row{display:grid;grid-template-columns:64px minmax(0,1.4fr) minmax(0,.8fr) minmax(0,.8fr) minmax(0,.8fr);gap:6px;align-items:center}
+    .page-default-row{border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.025);padding:8px;display:grid;gap:7px}
+    .page-default-main{display:grid;grid-template-columns:54px minmax(0,1fr);gap:8px;align-items:center}
     .page-default-name{font-size:12px;color:var(--muted);font-weight:800}
     .page-default-row select{height:34px;border-radius:8px;font-size:12px;padding:0 8px}
+    .page-default-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+    .seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;border:1px solid var(--line);border-radius:8px;padding:2px;background:rgba(255,255,255,.025);min-width:0}
+    .seg-btn{height:28px;min-width:0;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:11px;font-weight:800;padding:0 4px;box-shadow:none}
+    .seg-btn:hover{filter:none;transform:none;box-shadow:none;color:var(--text)}
+    .seg-btn.on{background:rgba(100,210,193,.12);color:var(--accent-2)}
     .schedule-item{border:1px solid var(--line);background:rgba(255,255,255,.03);border-radius:8px;padding:10px 12px;margin-bottom:8px}
     .schedule-time{font-size:12px;color:var(--accent-2);font-weight:750;margin-bottom:4px}
     .schedule-title{font-size:14px;font-weight:750}
@@ -2035,15 +2046,15 @@ const html = `<!doctype html>
       .msg{padding:11px 12px}
       form{padding-top:8px}
       .paradigm-row{gap:4px}
-      .paradigm-row select{max-width:100%;font-size:13px;height:34px;padding:0 10px}
+      .paradigm-row select{max-width:100%;font-size:12px;height:30px;padding:0 9px}
       .slot{min-height:34px;font-size:11px;padding:4px 6px}
-      .chip{height:34px;font-size:13px;padding:0 10px}
-      .page-default-row{grid-template-columns:1fr 1fr;gap:6px}
-      .page-default-name{grid-column:1 / -1}
+      .chip{height:30px;font-size:12px;padding:0 9px}
+      .page-default-main{grid-template-columns:48px minmax(0,1fr)}
+      .page-default-controls{grid-template-columns:1fr;gap:5px}
       .model-btn{height:26px;font-size:11px;padding:0 8px}
-      .bar{grid-template-columns:1fr}
-      #send{width:100%;height:46px}
-      textarea{min-height:50px}
+      .bar{grid-template-columns:minmax(0,1fr) auto;gap:6px}
+      #send{width:auto;height:38px;min-width:58px;padding:0 12px}
+      textarea{min-height:38px;height:38px;padding:8px 10px}
     }
     @media (max-width: 380px){
       .brand{gap:5px}
@@ -2053,7 +2064,7 @@ const html = `<!doctype html>
       .paradigm-row select{max-width:100%;font-size:11px;height:30px;padding:0 7px}
       .slot{min-height:30px;font-size:10px;padding:4px 4px}
       .slot-row{gap:4px;margin-top:1px}
-      .chip{height:32px;font-size:12px;padding:0 8px}
+      .chip{height:30px;font-size:11px;padding:0 7px}
       select{height:38px;font-size:13px}
     }
   </style>
@@ -2093,6 +2104,7 @@ const html = `<!doctype html>
               <button id="billPrev" class="chip" style="height:28px;font-size:11px;padding:0 8px">◀</button>
               <span id="billMonth" style="font-size:14px;font-weight:700;min-width:80px;text-align:center"></span>
               <button id="billNext" class="chip" style="height:28px;font-size:11px;padding:0 8px">▶</button>
+              <button id="billRefresh" class="chip" style="height:28px;font-size:11px;padding:0 8px">刷新</button>
             </span>
           </div>
           <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap" id="billStats"></div>
@@ -2222,16 +2234,19 @@ const html = `<!doctype html>
           <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,.csv,.xls,.xlsx,.doc,.docx" multiple style="display:none" />
           <button class="chip" id="uploadBtn" type="button" title="上传文件">📎</button>
         </span>
-        <span class="slot-row">
-          <button class="slot" id="slot0" type="button" title="单击切换 · 双击绑定">+</button>
-          <button class="slot" id="slot1" type="button" title="单击切换 · 双击绑定">+</button>
-          <button class="slot" id="slot2" type="button" title="单击切换 · 双击绑定">+</button>
-          <button class="slot" id="slot3" type="button" title="单击切换 · 双击绑定">+</button>
-          <button class="slot" id="slot4" type="button" title="单击切换 · 双击绑定">+</button>
-        </span>
       </div>
       <div class="bar"><textarea id="input" placeholder="输入一句话" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false"></textarea><button id="send">发送</button><span class="char-count" id="charCount"></span></div>
     </form>
+    <div class="slot-wrap" id="slotWrap">
+      <span class="slot-row">
+        <button class="slot" id="slot0" type="button" title="单击切换 · 双击绑定">+</button>
+        <button class="slot" id="slot1" type="button" title="单击切换 · 双击绑定">+</button>
+        <button class="slot" id="slot2" type="button" title="单击切换 · 双击绑定">+</button>
+        <button class="slot" id="slot3" type="button" title="单击切换 · 双击绑定">+</button>
+        <button class="slot" id="slot4" type="button" title="单击切换 · 双击绑定">+</button>
+      </span>
+    </div>
+    <button class="slot-toggle" id="slotToggle" type="button" title="快捷笔记">⌃</button>
     <nav class="bottom-bar" id="bottomBar">
       <button class="bb-tab on" data-page="chat">💬<span>对话</span></button>
       <button class="bb-tab" data-page="inbox">📥<span>Inbox</span></button>
@@ -2257,6 +2272,8 @@ const html = `<!doctype html>
     const settingsBtn = document.getElementById('settingsBtn');
     const cancelBtn = document.getElementById('cancelBtn');
     const charCount = document.getElementById('charCount');
+    const slotToggle = document.getElementById('slotToggle');
+    const slotWrap = document.getElementById('slotWrap');
     const toastEl = document.getElementById('toast');
     const convList = document.getElementById('convList');
     const convSidebar = document.getElementById('convSidebar');
@@ -2601,11 +2618,16 @@ const html = `<!doctype html>
       slotParadigms[i] = { path, name: paradigmSelect.options[paradigmSelect.selectedIndex].text, content: paradigmCache[path] || '' };
       saveSlots(); updateSlotUI();
     }
+    function setSlotExpanded(open) {
+      slotWrap.classList.toggle('open', open);
+      slotToggle.classList.toggle('open', open);
+      slotToggle.textContent = open ? '⌄' : '⌃';
+    }
     slotBtns.forEach((btn, i) => {
       let clickTimer = null;
       btn.addEventListener('click', () => {
-        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; bindSlot(i); }
-        else { clickTimer = setTimeout(() => { clickTimer = null; activateSlot(i); }, 300); }
+        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; bindSlot(i); setSlotExpanded(false); }
+        else { clickTimer = setTimeout(() => { clickTimer = null; activateSlot(i); setSlotExpanded(false); }, 300); }
       });
     });
 
@@ -2666,6 +2688,13 @@ const html = `<!doctype html>
       autoFollowChat = true;
       scrollHint.classList.remove('visible');
     }
+    function resetInputHeight() {
+      input.style.height = '38px';
+    }
+    function resizeInput() {
+      input.style.height = '38px';
+      input.style.height = Math.min(Math.max(input.scrollHeight, 38), 118) + 'px';
+    }
 
     // ── Streaming bubble ──
     function addStreamingBubble() {
@@ -2696,6 +2725,8 @@ const html = `<!doctype html>
       if (!prompt && !hasFiles) return;
       input.value = '';
       charCount.textContent = '';
+      resetInputHeight();
+      setSlotExpanded(false);
       const files = pendingFiles; pendingFiles = [];
       uploadBtn.textContent = '📎'; uploadBtn.style.color = ''; uploadBtn.style.borderColor = '';
       const userPrompt = prompt || '请处理附件内容。';
@@ -2862,7 +2893,7 @@ const html = `<!doctype html>
           }
         }
       } finally {
-        send.disabled = false; input.blur(); streamingAbort = null;
+        send.disabled = false; input.blur(); resetInputHeight(); streamingAbort = null;
         saveConversations(); renderConvList();
         if (conv.status === 'done' && singleTurn) { activeConvId = null; }
       }
@@ -2873,8 +2904,10 @@ const html = `<!doctype html>
     input.addEventListener('keydown', e => { if ((e.key === 'Enter' && !e.shiftKey) || (e.key === 'Enter' && e.ctrlKey)) { e.preventDefault(); submit(input.value); } });
     input.addEventListener('input', () => {
       const len = input.value.length; charCount.textContent = len > 0 ? len + ' 字符' : '';
-      input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+      resizeInput();
     });
+    input.addEventListener('blur', () => { if (!input.value.trim()) resetInputHeight(); });
+    slotToggle.addEventListener('click', () => setSlotExpanded(!slotWrap.classList.contains('open')));
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSidebar(); });
     cancelBtn.addEventListener('click', cancelCurrentTask);
     thread.addEventListener('click', e => {
@@ -2884,6 +2917,7 @@ const html = `<!doctype html>
       if (currentPage !== 'chat') return;
       autoFollowChat = isChatNearBottom();
       scrollHint.classList.toggle('visible', !autoFollowChat);
+      if (!autoFollowChat && !input.value.trim()) { resetInputHeight(); setSlotExpanded(false); }
     }, {passive:true});
     scrollHint.addEventListener('click', () => { autoFollowChat = true; scrollToBottom(true); });
     convToggle.addEventListener('click', toggleSidebar);
@@ -2950,6 +2984,8 @@ const html = `<!doctype html>
       document.getElementById('page-' + currentPage).classList.add('active');
       const isChat = currentPage === 'chat';
       document.getElementById('form').style.display = isChat ? '' : 'none';
+      slotToggle.style.display = isChat ? '' : 'none';
+      if (!isChat) setSlotExpanded(false);
       document.getElementById('bottomBar').style.display = '';
     }
     document.getElementById('bottomBar').addEventListener('click', e => {
@@ -3082,6 +3118,12 @@ const html = `<!doctype html>
       if (m > 12) { m = 1; y++; }
       billMonth = String(m).padStart(2,'0'); billYear = y;
       loadBills(billYear, billMonth);
+    });
+    document.getElementById('billRefresh').addEventListener('click', () => {
+      if (!billYear || !billMonth) return;
+      delete billCache[billYear + '-' + billMonth];
+      loadBills(billYear, billMonth);
+      toast('账单已刷新');
     });
     function dateKey(d) {
       return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
@@ -3649,11 +3691,21 @@ const html = `<!doctype html>
     function pageTaskOptions(selected) {
       return '<option value="">保持当前提示词</option>' + settingsTasks.map(t => '<option value="' + t.path.replace(/"/g,'&quot;') + '"' + (selected === t.path ? ' selected' : '') + '>' + escapeHtml(t.name) + '</option>').join('');
     }
-    function modelOptions(selected) {
-      return '<option value="keep">保持当前模型</option>' + availableModels.map(m => '<option value="' + m.replace(/"/g,'&quot;') + '"' + (selected === m ? ' selected' : '') + '>' + escapeHtml(modelLabel(m)) + '</option>').join('');
+    function segButton(field, value, label, selected) {
+      return '<button class="seg-btn' + (selected === value ? ' on' : '') + '" type="button" data-field="' + field + '" data-value="' + String(value).replace(/"/g,'&quot;') + '">' + escapeHtml(label) + '</button>';
     }
-    function modeOptions(selected) {
-      return '<option value="keep">保持</option><option value="on"' + (selected === 'on' ? ' selected' : '') + '>开启</option><option value="off"' + (selected === 'off' ? ' selected' : '') + '>关闭</option>';
+    function modelButtons(selected) {
+      const buttons = [segButton('model', 'keep', '模型', selected || 'keep')];
+      availableModels.forEach(m => buttons.push(segButton('model', m, modelLabel(m), selected || 'keep')));
+      return '<div class="seg page-default-model">' + buttons.join('') + '</div>';
+    }
+    function modeButtons(field, selected, label) {
+      const v = selected || 'keep';
+      return '<div class="seg page-default-' + field + '">' +
+        segButton(field, 'keep', label, v) +
+        segButton(field, 'on', '开', v) +
+        segButton(field, 'off', '关', v) +
+      '</div>';
     }
     function renderPageDefaultSettings() {
       const box = document.getElementById('pageDefaultSettings');
@@ -3662,22 +3714,27 @@ const html = `<!doctype html>
       box.innerHTML = PAGE_DEFAULT_PAGES.map(page => {
         const cfg = defaults[page.key] || {};
         return '<div class="page-default-row" data-page-default="' + page.key + '">' +
-          '<div class="page-default-name">' + page.label + '</div>' +
-          '<select class="settings-input page-default-task">' + pageTaskOptions(cfg.taskPath || '') + '</select>' +
-          '<select class="settings-input page-default-model">' + modelOptions(cfg.model || 'keep') + '</select>' +
-          '<select class="settings-input page-default-fast">' + modeOptions(cfg.fastMode || 'keep') + '</select>' +
-          '<select class="settings-input page-default-single">' + modeOptions(cfg.singleTurn || 'keep') + '</select>' +
+          '<div class="page-default-main"><div class="page-default-name">' + page.label + '</div>' +
+          '<select class="settings-input page-default-task">' + pageTaskOptions(cfg.taskPath || '') + '</select></div>' +
+          '<div class="page-default-controls">' +
+            modelButtons(cfg.model || 'keep') +
+            modeButtons('fast', cfg.fastMode || 'keep', '快捷') +
+            modeButtons('single', cfg.singleTurn || 'keep', '单轮') +
+          '</div>' +
         '</div>';
       }).join('');
+    }
+    function activeSegValue(row, field) {
+      return row.querySelector('.seg-btn.on[data-field="' + field + '"]')?.dataset.value || 'keep';
     }
     function collectPageDefaultSettings() {
       const out = {};
       document.querySelectorAll('[data-page-default]').forEach(row => {
         out[row.dataset.pageDefault] = {
           taskPath: row.querySelector('.page-default-task')?.value || '',
-          model: row.querySelector('.page-default-model')?.value || 'keep',
-          fastMode: row.querySelector('.page-default-fast')?.value || 'keep',
-          singleTurn: row.querySelector('.page-default-single')?.value || 'keep',
+          model: activeSegValue(row, 'model'),
+          fastMode: activeSegValue(row, 'fast'),
+          singleTurn: activeSegValue(row, 'single'),
         };
       });
       return out;
@@ -3755,6 +3812,13 @@ const html = `<!doctype html>
     });
     document.getElementById('settingsTaskSelect').addEventListener('change', () => {
       renderBoundDirs();
+    });
+    document.getElementById('pageDefaultSettings').addEventListener('click', e => {
+      const btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      const group = btn.closest('.seg');
+      if (!group) return;
+      group.querySelectorAll('.seg-btn').forEach(item => item.classList.toggle('on', item === btn));
     });
     document.getElementById('settingsSavePageDefaults').addEventListener('click', () => {
       savePageDefaults(collectPageDefaultSettings());
